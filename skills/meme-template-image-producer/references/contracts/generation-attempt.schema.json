@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.memebuy.cn/generation-attempt-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "requestIdentity", "strategySha256", "promptSha256", "inputImageSha256", "inputUriSha256",
+    "ruleVersion", "revision", "state",
+    "model", "quality", "num_images", "output_format", "image_size", "expectedFalCalls"
+  ],
+  "properties": {
+    "requestIdentity": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "strategySha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "promptSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "inputImageSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "inputUriSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "ruleVersion": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 1},
+    "state": {"enum": ["submitting", "submission_unknown", "provider_pending", "provider_failed"]},
+    "model": {"const": "openai/gpt-image-2/edit"},
+    "quality": {"const": "low"},
+    "num_images": {"const": 1},
+    "output_format": {"const": "png"},
+    "image_size": {"enum": ["1024x1024", "1152x896", "896x1152", "768x1344", "1344x768"]},
+    "expectedFalCalls": {"const": 1},
+    "providerResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id"],
+      "properties": {
+        "request_id": {"type": "string", "minLength": 1},
+        "status": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

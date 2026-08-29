@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.memebuy.cn/image-revision-review-context-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["currentRevision", "previousRevision", "currentCorrectionPlan", "fullHistory"],
+  "properties": {
+    "currentRevision": {"type": "integer", "minimum": 1},
+    "previousVisualReviewSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "previousFailedGates": {"type": "array", "items": {"type": "string"}},
+    "previousRevision": {
+      "type": ["object", "null"],
+      "properties": {
+        "revision": {"type": "integer", "minimum": 1},
+        "generatedImage": {"type": "object"},
+        "reasonCodes": {"type": "array", "items": {"type": "string"}},
+        "humanNote": {"type": "string"},
+        "decidedAt": {"type": "string"},
+        "reviewerRef": {"type": "string", "minLength": 1},
+        "visualReviewSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "failureClass": {"enum": ["visual_rejection", "strategy_rejection", "technical_failure", "cost_api_failure"]},
+        "readOnly": {"const": true}
+      },
+      "required": ["revision", "generatedImage", "reasonCodes", "humanNote", "decidedAt", "reviewerRef", "visualReviewSha256", "failureClass", "readOnly"],
+      "additionalProperties": false
+    },
+    "currentCorrectionPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reasonTreatments"],
+      "properties": {
+        "reasonTreatments": {"type": "array", "items": {"type": "object"}}
+      }
+    },
+    "fullHistory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["readOnly", "collapsedByDefault", "entries"],
+      "properties": {
+        "readOnly": {"const": true},
+        "collapsedByDefault": {"const": true},
+        "entries": {"type": "array", "items": {"type": "object"}}
+      }
+    }
+  }
+}

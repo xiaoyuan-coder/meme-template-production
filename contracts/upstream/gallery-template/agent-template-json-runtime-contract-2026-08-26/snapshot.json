@@ -1,0 +1,11 @@
+{
+  "identity": "agent-template-json-runtime-contract-2026-08-26",
+  "file": "gallery-template.schema.json",
+  "sha256": "317ed2444a8109722fd6bdafd00c1f43b66b59096aea8b29d6aecfb2a542f608",
+  "upgradePolicy": "add-version-and-contract-diff",
+  "productionProfile": {
+    "inputSchemaVersion": 2,
+    "runtimeSemanticsVersion": 2,
+    "identityBindingsRequireClothingOwnership": true
+  }
+}

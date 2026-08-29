@@ -1,0 +1,91 @@
+{
+  "contractVersion": 1,
+  "replacementRequired": true,
+  "provider": "fal",
+  "providerEnvironment": {"credential": "FAL_KEY", "adapterFactory": "create_fal_adapter_from_environment"},
+  "generation": {
+    "model": "openai/gpt-image-2/edit",
+    "quality": "low",
+    "num_images": 1,
+    "output_format": "png",
+    "inputField": "image_urls",
+    "inputCardinality": 1,
+    "sizes": {
+      "1024x1024": {"width": 1024, "height": 1024},
+      "1152x896": {"width": 1152, "height": 896},
+      "896x1152": {"width": 896, "height": 1152},
+      "768x1344": {"width": 768, "height": 1344},
+      "1344x768": {"width": 1344, "height": 768}
+    }
+  },
+  "failureClasses": [
+    "visual_rejection",
+    "strategy_rejection",
+    "technical_failure",
+    "cost_api_failure"
+  ],
+  "replacement": {
+    "categories": [
+      "ordinary_person", "public_figure", "anime_ip", "historical_figure",
+      "cat", "dog", "other_animal", "object", "food", "scene", "text"
+    ],
+    "operations": [
+      "identity_replace", "scene_replace", "mask_fill", "content_replace", "ordered_set"
+    ],
+    "canvasRoutes": ["standalone_design", "print_artwork", "screen_content", "full_scene"],
+    "promptSections": [
+      "task", "target", "dependencyClosure", "identityGroups", "canvas",
+      "markPolicy", "frozenSet", "visualFeatures", "residualCleanup",
+      "spatialRelations", "output"
+    ],
+    "promptLabels": {
+      "task": "任务",
+      "target": "目标",
+      "dependencyClosure": "依赖闭包",
+      "identityGroups": "身份组",
+      "canvas": "画布",
+      "markPolicy": "标记策略",
+      "frozenSet": "冻结项",
+      "visualFeatures": "视觉特征",
+      "residualCleanup": "残留清理",
+      "spatialRelations": "空间关系",
+      "output": "输出"
+    },
+    "requiredVisualFeatures": [
+      "medium", "composition", "proportions", "colorAndLight", "surface", "visualHook"
+    ],
+    "markActions": {
+      "platform_mark": ["remove"],
+      "author_watermark": ["remove"],
+      "account_mark": ["remove"],
+      "url": ["remove"],
+      "qr_code": ["remove"],
+      "trademark": ["preserve", "synchronize", "remove_with_reason"],
+      "gameplay_logo": ["preserve", "synchronize", "remove_with_reason"],
+      "decorative_sticker": ["preserve", "synchronize", "remove_with_reason"],
+      "identity_mark": ["preserve", "synchronize", "remove_with_reason"]
+    },
+    "textActions": ["preserve", "replace", "remove", "synchronize_identity"]
+  },
+  "imageReview": {
+    "requiredGates": [
+      "target_replaced",
+      "dependency_closure_complete",
+      "identity_group_complete",
+      "legacy_identity_cleared",
+      "mark_policy_satisfied",
+      "text_policy_satisfied",
+      "frozen_structure_preserved",
+      "medium_continuity_preserved",
+      "canvas_route_satisfied",
+      "spatial_relations_valid",
+      "contact_anatomy_valid",
+      "non_target_regions_stable"
+    ],
+    "humanApprovalFields": [
+      "decision", "objectSha256", "reviewPackageSha256", "reviewerRef",
+      "decidedAt", "ruleVersion", "revision"
+    ]
+  },
+  "batch": {"minimumItems": 1, "maximumItems": 100}
+}

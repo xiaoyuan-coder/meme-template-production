@@ -1,0 +1,69 @@
+{
+  "contractVersion": 1,
+  "keyPattern": "^[a-z][a-z0-9-]{1,59}$",
+  "keyDecisions": [
+    "NEW",
+    "EXISTING_SAME_SOURCE",
+    "KEY_COLLISION",
+    "SOURCE_CONFLICT",
+    "REGISTRY_UNAVAILABLE"
+  ],
+  "keyRegistry": {
+    "onlineAdapter": "MemeAdminKeyRegistryClient",
+    "method": "POST",
+    "path": "/api/v1/template-key-registry/resolve",
+    "portableAdapter": "SnapshotKeyRegistryReader"
+  },
+  "gallery": {
+    "snapshotIdentity": "agent-template-json-runtime-contract-2026-08-26",
+    "snapshotRelativePath": "contracts/upstream/gallery-template/agent-template-json-runtime-contract-2026-08-26/gallery-template.schema.json",
+    "installedSnapshotRelativePath": "references/contracts/gallery-template.schema.json",
+    "snapshotSha256": "317ed2444a8109722fd6bdafd00c1f43b66b59096aea8b29d6aecfb2a542f608",
+    "inputSchemaVersion": 2,
+    "runtimeSemanticsVersion": 2,
+    "formalFields": [
+      "key", "status", "title", "description", "imageSize", "imageN", "kind",
+      "promptTemplate", "inputSchema", "preprocessSteps", "runtimeSemantics",
+      "metadata", "cover", "referenceImage"
+    ]
+  },
+  "oss": {
+    "profile": "memebuy-production",
+    "baseUrl": "https://assets.memebuy.cn",
+    "objectKeyTemplate": "gallery/templates/{key}/{approvedImageSha256}.png",
+    "adapterFactory": "create_aliyun_oss_adapter_from_environment",
+    "environment": [
+      "OSS_ENDPOINT", "OSS_BUCKET_NAME", "OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_SECRET"
+    ],
+    "reconciliationFields": [
+      "objectKey", "sha256", "byteLength", "remoteIdentity", "requestIdentity"
+    ]
+  },
+  "authoring": {
+    "titleMaxLength": 20,
+    "descriptionMaxLength": 20,
+    "tagMinimum": 5,
+    "tagMaximum": 8,
+    "tagMaxLength": 12,
+    "expectedEvidenceFields": [
+      "key", "title", "description", "tags", "imageSize", "slots", "suggestions",
+      "defaults", "text", "subjectsAndIdentityBindings", "promptTemplate",
+      "visualContract", "inputBindings", "clothingOwnership", "cover", "referenceImage"
+    ],
+    "titleGates": [
+      "templateGrounded", "usageMotivation", "spokenNaturalness", "slotPortability"
+    ],
+    "internalPromptTerms": [
+      "runtimeSemantics", "visualContract", "inputBindings", "targetInstances",
+      "clothingOwnership", "后端合同", "治理门禁", "内部 ID"
+    ],
+    "allowedTextActions": ["open_slot", "free_editable", "preserve", "remove", "review"],
+    "textRoles": ["identity", "content", "attribution", "watermark", "brand", "ambiguous"],
+    "tagCategories": ["mechanism", "subject", "scene", "medium", "emotion", "use_case", "text", "relation"],
+    "singleSlotAxes": [
+      "subject", "text", "object", "clothing", "color", "prop", "scene", "nested_content"
+    ],
+    "semanticCompiler": "compile_semantics_from_analysis"
+  },
+  "batch": {"minimumItems": 1, "maximumItems": 100}
+}

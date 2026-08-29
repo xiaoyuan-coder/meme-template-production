@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.memebuy.cn/replacement-strategy-review-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "state", "itemId", "revision", "ruleVersion", "sourceImageSha256", "inputImage",
+    "inputUriSha256", "sourcePreview",
+    "replacementTarget", "replacementValue", "categoryContinuity", "identityResearch",
+    "sourceIdentityUnitIds", "subjectContinuityEvidence", "identityBindingGroups",
+    "assetUnitIds", "assetBindingGroups", "dependencyClosure",
+    "textActions", "markActions", "operations", "targetCanvas", "frozenSet", "risks",
+    "promptSections", "prompt", "imageSize", "expectedFalCalls", "objectSha256",
+    "strategySha256", "promptSha256"
+  ],
+  "properties": {
+    "state": {"const": "awaiting_strategy_approval"},
+    "itemId": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 1},
+    "ruleVersion": {"type": "string", "minLength": 1},
+    "sourceImageSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "inputImage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["uri", "sha256"],
+      "properties": {
+        "uri": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "inputUriSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "sourcePreview": {"type": "string", "minLength": 1},
+    "replacementTarget": {"type": "string", "minLength": 1},
+    "replacementValue": {"type": "string", "minLength": 1},
+    "categoryContinuity": {"type": "object"},
+    "identityResearch": {"type": "object"},
+    "sourceIdentityUnitIds": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "subjectContinuityEvidence": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "identityBindingGroups": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "assetUnitIds": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "assetBindingGroups": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "dependencyClosure": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "textActions": {"type": "array", "items": {"type": "object"}},
+    "markActions": {"type": "array", "items": {"type": "object"}},
+    "operations": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "targetCanvas": {"type": "object"},
+    "frozenSet": {"type": "array", "minItems": 1},
+    "risks": {"type": "array", "items": {"type": "object"}},
+    "promptSections": {"type": "object"},
+    "prompt": {"type": "string", "minLength": 1},
+    "imageSize": {"enum": ["1024x1024", "1152x896", "896x1152", "768x1344", "1344x768"]},
+    "expectedFalCalls": {"const": 1},
+    "objectSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "strategySha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "promptSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

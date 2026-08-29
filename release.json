@@ -1,0 +1,15 @@
+{
+  "releaseVersion": "0.2.1",
+  "skills": {
+    "meme-template-image-producer": "0.2.1",
+    "meme-template-json-compiler": "0.2.1"
+  },
+  "sharedContractVersion": 1,
+  "galleryContract": {
+    "identity": "agent-template-json-runtime-contract-2026-08-26",
+    "relativePath": "contracts/upstream/gallery-template/agent-template-json-runtime-contract-2026-08-26/gallery-template.schema.json",
+    "sha256": "317ed2444a8109722fd6bdafd00c1f43b66b59096aea8b29d6aecfb2a542f608",
+    "productionInputSchemaVersion": 2,
+    "productionRuntimeSemanticsVersion": 2
+  }
+}

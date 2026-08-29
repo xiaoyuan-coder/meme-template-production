@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.memebuy.cn/data-workbench-runtime-envelope-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "itemId"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "itemId": {"type": "string", "minLength": 1},
+    "existingKey": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,59}$"},
+    "sourceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "sourceAssetId"],
+      "properties": {
+        "namespace": {"type": "string", "minLength": 1},
+        "sourceAssetId": {"type": "string", "minLength": 1},
+        "sourceSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    }
+  }
+}

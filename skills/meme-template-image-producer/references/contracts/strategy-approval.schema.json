@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.memebuy.cn/strategy-approval-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision", "objectSha256", "strategySha256", "promptSha256",
+    "sourceImageSha256", "inputUriSha256", "reviewerRef", "decidedAt",
+    "ruleVersion", "revision"
+  ],
+  "properties": {
+    "decision": {"const": "APPROVED"},
+    "objectSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "strategySha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "promptSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "sourceImageSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "inputUriSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "reviewerRef": {"type": "string", "minLength": 1},
+    "decidedAt": {"type": "string", "format": "date-time"},
+    "ruleVersion": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 1}
+  }
+}

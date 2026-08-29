@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.memebuy.cn/image-review-package-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "state", "itemId", "ruleVersion", "revision", "sourceImage", "generatedImage", "evidence",
+    "hardFailures", "warnings", "revisionContext", "machineDecision"
+  ],
+  "properties": {
+    "state": {"const": "awaiting_image_approval"},
+    "itemId": {"type": "string", "minLength": 1},
+    "ruleVersion": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 1},
+    "sourceImage": {"type": "object"},
+    "generatedImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sha256", "width", "height", "mime"],
+      "properties": {
+        "uri": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "mime": {"const": "image/png"}
+      }
+    },
+    "evidence": {
+      "type": "array", "minItems": 12, "maxItems": 12,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["gate", "passed", "summary"],
+        "properties": {
+          "gate": {"enum": [
+            "target_replaced", "dependency_closure_complete", "identity_group_complete",
+            "legacy_identity_cleared", "mark_policy_satisfied", "text_policy_satisfied",
+            "frozen_structure_preserved", "medium_continuity_preserved",
+            "canvas_route_satisfied", "spatial_relations_valid", "contact_anatomy_valid",
+            "non_target_regions_stable"
+          ]},
+          "passed": {"type": "boolean"},
+          "summary": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "hardFailures": {"type": "array", "items": {"type": "object"}},
+    "warnings": {"type": "array", "items": {"type": "object"}},
+    "revisionContext": {"type": "object"},
+    "machineDecision": {"enum": ["blocked", "eligible_for_human_review"]}
+  }
+}

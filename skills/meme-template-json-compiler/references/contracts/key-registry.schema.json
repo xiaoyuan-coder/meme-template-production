@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.memebuy.cn/key-registry-v1.schema.json",
+  "$defs": {
+    "sourceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "sourceAssetId"],
+      "properties": {
+        "namespace": {"type": "string", "minLength": 1},
+        "sourceAssetId": {"type": "string", "minLength": 1},
+        "sourceSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposedKey"],
+      "properties": {
+        "proposedKey": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,59}$"},
+        "existingKey": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,59}$"},
+        "sourceIdentity": {"$ref": "#/$defs/sourceIdentity"}
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["registryRevision", "decision", "resolvedKey", "matchedBy", "evidence"],
+      "properties": {
+        "registryRevision": {"type": ["string", "null"]},
+        "decision": {"enum": ["NEW", "EXISTING_SAME_SOURCE", "KEY_COLLISION", "SOURCE_CONFLICT", "REGISTRY_UNAVAILABLE"]},
+        "resolvedKey": {"type": ["string", "null"]},
+        "matchedBy": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "evidence": {"type": "array", "items": {"type": "object"}}
+      }
+    }
+  }
+}

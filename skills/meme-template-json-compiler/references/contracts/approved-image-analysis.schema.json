@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.memebuy.cn/approved-image-analysis-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "approvedImageSha256", "visualMechanism", "componentGraph",
+    "identityTopology", "textRegions", "mediumComposition", "spatialRelations",
+    "containers", "fixedStructure", "editableCandidates", "counts", "fieldEvidence",
+    "titleEvidence", "tagEvidence", "slotEvidence", "promptCoverage",
+    "singleSlotExhaustion", "translationEquivalences", "semanticModel", "warnings"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "approvedImageSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "visualMechanism": {"type": "string", "minLength": 1},
+    "componentGraph": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "identityTopology": {"type": "array", "items": {"type": "object"}},
+    "textRegions": {"type": "array", "items": {"type": "object"}},
+    "mediumComposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["medium", "styleTraits", "composition", "colorAndLight"],
+      "properties": {
+        "medium": {"type": "string", "minLength": 1},
+        "styleTraits": {"type": "array", "minItems": 1},
+        "composition": {"type": "array", "minItems": 1},
+        "colorAndLight": {"type": "array", "minItems": 1}
+      }
+    },
+    "spatialRelations": {"type": "array", "items": {"type": "object"}},
+    "containers": {"type": "array", "items": {"type": "object"}},
+    "fixedStructure": {"type": "array", "minItems": 1},
+    "editableCandidates": {"type": "array", "items": {"type": "object"}},
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identityCount", "visualInstanceCount", "uploadAssetCount", "inputControlCount"],
+      "properties": {
+        "identityCount": {"type": "integer", "minimum": 0},
+        "visualInstanceCount": {"type": "integer", "minimum": 0},
+        "uploadAssetCount": {"type": "integer", "minimum": 0},
+        "inputControlCount": {"type": "integer", "minimum": 0}
+      }
+    },
+    "fieldEvidence": {"type": "object"},
+    "titleEvidence": {"type": "object"},
+    "tagEvidence": {"type": "object"},
+    "slotEvidence": {"type": "object"},
+    "promptCoverage": {"type": "object"},
+    "singleSlotExhaustion": {"type": "object"},
+    "translationEquivalences": {"type": "array", "items": {"type": "object"}},
+    "semanticModel": {"type": "object"},
+    "warnings": {"type": "array", "items": {"type": "object"}}
+  }
+}

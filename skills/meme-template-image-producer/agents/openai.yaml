@@ -1,0 +1,4 @@
+interface:
+  display_name: "Meme Template Image Producer"
+  short_description: "Approve replacement-based meme template image production"
+  default_prompt: "Use $meme-template-image-producer to create and approve a replacement-based meme template image."
