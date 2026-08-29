@@ -127,7 +127,14 @@ class FalHttpEditAdapter:
         mime = match.group(1)
         try:
             content = base64.b64decode(match.group(2), validate=True)
-            hosted = self._uploader(content, mime, f"approved-input.{mime.split('/')[1]}")
+            hosted = None
+            for attempt in range(2):
+                try:
+                    hosted = self._uploader(content, mime, f"approved-input.{mime.split('/')[1]}")
+                    break
+                except Exception:
+                    if attempt == 1:
+                        raise
         except Exception:
             raise InputHostingError("FAL input hosting failed before generation submission") from None
         if not isinstance(hosted, str) or not hosted.startswith("https://"):

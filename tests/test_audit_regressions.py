@@ -236,6 +236,65 @@ class AuditRegressionTests(unittest.TestCase):
                 self.assertNotIn("provider-secret", str(failure.exception))
                 self.assertNotIn("signed.invalid", str(failure.exception))
 
+    def test_input_hosting_retries_once_without_retrying_generation_post(self):
+        class Response:
+            status_code = 202
+
+            @staticmethod
+            def json():
+                return {"request_id": "provider-request-after-hosting-retry"}
+
+        class Client:
+            def __init__(self):
+                self.calls = []
+
+            def post(self, url, *, json):
+                self.calls.append((url, copy.deepcopy(json)))
+                return Response()
+
+        upload_calls = []
+
+        def transient_uploader(content, mime, file_name):
+            upload_calls.append((content, mime, file_name))
+            if len(upload_calls) == 1:
+                raise OSError("temporary storage connection failure")
+            return "https://v3.fal.media/files/recovered-input.png"
+
+        client = Client()
+        adapter = producer.FalHttpEditAdapter(client, transient_uploader)
+        response = adapter.submit_edit("openai/gpt-image-2/edit", {
+            "image_urls": ["data:image/png;base64,iVBORw0KGgo="],
+            "prompt": "safe replacement",
+            "quality": "low",
+            "num_images": 1,
+            "output_format": "png",
+            "image_size": {"width": 1024, "height": 1024},
+        })
+        self.assertEqual(response["request_id"], "provider-request-after-hosting-retry")
+        self.assertEqual(len(upload_calls), 2)
+        self.assertEqual(len(client.calls), 1)
+
+        failed_upload_calls = []
+
+        def failing_uploader(content, mime, file_name):
+            failed_upload_calls.append((content, mime, file_name))
+            raise OSError("FAL_KEY=must-not-leak")
+
+        blocked_client = Client()
+        blocked = producer.FalHttpEditAdapter(blocked_client, failing_uploader)
+        with self.assertRaises(producer.InputHostingError) as failure:
+            blocked.submit_edit("openai/gpt-image-2/edit", {
+                "image_urls": ["data:image/png;base64,iVBORw0KGgo="],
+                "prompt": "safe replacement",
+                "quality": "low",
+                "num_images": 1,
+                "output_format": "png",
+                "image_size": {"width": 1024, "height": 1024},
+            })
+        self.assertEqual(len(failed_upload_calls), 2)
+        self.assertEqual(blocked_client.calls, [])
+        self.assertNotIn("must-not-leak", str(failure.exception))
+
     def test_meme_admin_registry_client_uses_the_frozen_local_endpoint_contract(self):
         class Transport:
             def __init__(self):
