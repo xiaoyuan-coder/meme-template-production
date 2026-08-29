@@ -11,6 +11,7 @@ import hashlib
 import importlib
 import json
 import os
+import re
 import tempfile
 from copy import deepcopy
 from datetime import datetime
@@ -39,13 +40,26 @@ class ExternalAdapterError(ContractError):
 
     code = "EXTERNAL_ADAPTER_FAILURE"
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        error_type: str | None = None,
+        outcome_known: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_type = error_type
+        self.outcome_known = outcome_known
+
 
 class FalEditAdapter(Protocol):
     def submit_edit(self, model: str, payload: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
 
-class FalClientEditAdapter:
-    """One-shot fal-client queue adapter; it has no retry or model fallback path."""
+class FalHttpEditAdapter:
+    """One-shot FAL queue adapter; the injected HTTP client must not retry POSTs."""
 
     def __init__(self, client: Any) -> None:
         self._client = client
@@ -53,14 +67,46 @@ class FalClientEditAdapter:
     def submit_edit(self, model: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         _validate_compiled_fal_payload(model, payload)
         try:
-            handle = self._client.submit(model, arguments=dict(payload))
+            response = self._client.post(
+                f"https://queue.fal.run/{model}",
+                json=dict(payload),
+            )
+        except Exception as exc:
+            request_id = getattr(exc, "request_id", None)
+            if isinstance(request_id, str) and request_id:
+                return {"request_id": request_id, "status": "submission_timeout"}
+            failure = _safe_provider_failure(exc)
+            if failure is None:
+                raise ExternalAdapterError("FAL submission failed with an unknown outcome") from None
+            status_code, error_type = failure
+            outcome_known = 400 <= status_code < 500 and status_code not in {408, 409, 425, 429}
+            outcome = "was rejected" if outcome_known else "has an unknown outcome"
+            raise ExternalAdapterError(
+                f"FAL submission {outcome} (HTTP {status_code})",
+                status_code=status_code,
+                error_type=error_type,
+                outcome_known=outcome_known,
+            ) from None
+        status_code = getattr(response, "status_code", None)
+        if not isinstance(status_code, int):
+            raise ExternalAdapterError("FAL submission returned no HTTP status")
+        if not 200 <= status_code < 300:
+            error_type = _safe_response_error_type(response)
+            outcome_known = 400 <= status_code < 500 and status_code not in {408, 409, 425, 429}
+            outcome = "was rejected" if outcome_known else "has an unknown outcome"
+            raise ExternalAdapterError(
+                f"FAL submission {outcome} (HTTP {status_code})",
+                status_code=status_code,
+                error_type=error_type,
+                outcome_known=outcome_known,
+            )
+        try:
+            body = response.json()
         except Exception:
-            raise ExternalAdapterError("FAL submission failed with an unknown outcome") from None
-        request_id = getattr(handle, "request_id", None)
-        if request_id is None and isinstance(handle, Mapping):
-            request_id = handle.get("request_id")
+            raise ExternalAdapterError("FAL submission returned an unreadable success response") from None
+        request_id = body.get("request_id") if isinstance(body, Mapping) else None
         if not isinstance(request_id, str) or not request_id:
-            raise ContractError("FAL submission returned no request identity")
+            raise ExternalAdapterError("FAL submission returned no request identity")
         return {"request_id": request_id, "status": "submitted"}
 
 
@@ -68,23 +114,59 @@ def create_fal_adapter_from_environment(
     environ: Mapping[str, str] | None = None,
     *,
     module_loader: Callable[[str], Any] = importlib.import_module,
-) -> FalClientEditAdapter:
+) -> FalHttpEditAdapter:
     """Create the real adapter only when a caller explicitly chooses this seam."""
 
     env = os.environ if environ is None else environ
     if not isinstance(env.get("FAL_KEY"), str) or not env["FAL_KEY"].strip():
         raise AdapterConfigurationError("FAL credentials are unavailable")
     try:
-        client = module_loader("fal_client")
+        httpx = module_loader("httpx")
     except (ImportError, ModuleNotFoundError):
-        raise AdapterConfigurationError("fal-client dependency is unavailable") from None
-    if not callable(getattr(client, "submit", None)):
-        raise AdapterConfigurationError("fal-client dependency has no submit seam")
-    return FalClientEditAdapter(client)
+        raise AdapterConfigurationError("httpx dependency is unavailable") from None
+    client_factory = getattr(httpx, "Client", None)
+    if not callable(client_factory):
+        raise AdapterConfigurationError("httpx dependency has no client seam")
+    client = client_factory(
+        headers={"Authorization": f"Key {env['FAL_KEY'].strip()}"},
+        timeout=120.0,
+        follow_redirects=True,
+    )
+    if not callable(getattr(client, "post", None)):
+        raise AdapterConfigurationError("httpx client has no POST seam")
+    return FalHttpEditAdapter(client)
 
 
 _SKILL_ROOT = Path(__file__).resolve().parents[1]
 _CONTRACT_PATH = _SKILL_ROOT / "references" / "machine-contract.json"
+
+
+def _safe_provider_failure(exc: Exception) -> tuple[int, str | None] | None:
+    """Extract allowlisted diagnostics without copying provider text or headers."""
+
+    status_code = getattr(exc, "status_code", None)
+    if not isinstance(status_code, int):
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+    if not isinstance(status_code, int) or not 400 <= status_code <= 599:
+        return None
+    error_type = getattr(exc, "error_type", None)
+    if not isinstance(error_type, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", error_type):
+        error_type = None
+    return status_code, error_type
+
+
+def _safe_response_error_type(response: Any) -> str | None:
+    """Read only one allowlisted diagnostic value from a provider error body."""
+
+    try:
+        body = response.json()
+    except Exception:
+        return None
+    error_type = body.get("error_type") if isinstance(body, Mapping) else None
+    if isinstance(error_type, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", error_type):
+        return error_type
+    return None
 
 
 def _contract() -> dict[str, Any]:
@@ -732,6 +814,14 @@ def submit_authorized_generation(
     })
     try:
         response = submit_generation_request(request, adapter)
+    except ExternalAdapterError as exc:
+        attempt_state["state"] = "provider_rejected" if exc.outcome_known else "submission_unknown"
+        if exc.status_code is not None:
+            attempt_state["providerFailure"] = {
+                "statusCode": exc.status_code,
+                **({"errorType": exc.error_type} if exc.error_type else {}),
+            }
+        raise
     except Exception:
         attempt_state["state"] = "submission_unknown"
         raise
@@ -743,6 +833,42 @@ def submit_authorized_generation(
     attempt_state["state"] = "provider_pending"
     attempt_state["providerResponse"] = summary
     return response
+
+
+def record_no_request_reconciliation(
+    attempt_state: MutableMapping[str, Any],
+    evidence: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Close an unknown submit only after complete, bounded FAL request-history evidence."""
+
+    if attempt_state.get("state") != "submission_unknown":
+        raise ContractError("only submission_unknown can be reconciled as no request created")
+    expected_endpoint = _contract()["generation"]["model"]
+    if set(evidence) != {
+        "source", "endpoint", "windowStart", "windowEnd", "checkedAt",
+        "queryComplete", "observedRequestIds",
+    }:
+        raise ContractError("submission reconciliation evidence fields differ from the frozen schema")
+    if evidence.get("source") != "fal_request_history" or evidence.get("endpoint") != expected_endpoint:
+        raise ContractError("submission reconciliation must use FAL history for the approved endpoint")
+    for name in ("windowStart", "windowEnd", "checkedAt"):
+        value = _non_empty_text(evidence.get(name), name)
+        try:
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ContractError(f"{name} must be an ISO-8601 timestamp") from exc
+    if evidence.get("queryComplete") is not True:
+        raise ContractError("incomplete provider history cannot prove that no request was created")
+    observed = evidence.get("observedRequestIds")
+    if not isinstance(observed, list) or observed:
+        raise ContractError("non-empty provider history requires request-level reconciliation")
+    attempt_state["state"] = "provider_rejected"
+    attempt_state["reconciliation"] = {
+        **dict(evidence),
+        "observedRequestCount": 0,
+        "conclusion": "no_request_created",
+    }
+    return dict(attempt_state)
 
 
 def summarize_provider_response(response: Mapping[str, Any]) -> dict[str, Any]:

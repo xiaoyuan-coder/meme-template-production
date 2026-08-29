@@ -15,7 +15,8 @@ class RepositoryContractTests(unittest.TestCase):
         json_requirements = (
             ROOT / "skills/meme-template-json-compiler/requirements.txt"
         ).read_text(encoding="utf-8").splitlines()
-        self.assertIn("fal-client>=1,<2", image_requirements)
+        self.assertIn("httpx>=0.28,<1", image_requirements)
+        self.assertFalse(any(requirement.startswith("fal-client") for requirement in image_requirements))
         self.assertIn("oss2>=2.19,<3", json_requirements)
 
     def test_release_points_to_exact_immutable_snapshot(self):

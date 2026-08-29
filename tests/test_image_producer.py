@@ -201,6 +201,77 @@ class ImageProducerTests(unittest.TestCase):
             )
         self.assertEqual(len(adapter.calls), 1)
 
+    def test_provider_http_failure_is_redacted_classified_and_not_resubmitted(self):
+        class RejectedFal(FakeFal):
+            def submit_edit(self, model, payload):
+                super().submit_edit(model, payload)
+                raise producer.ExternalAdapterError(
+                    "FAL submission was rejected (HTTP 422)",
+                    status_code=422,
+                    error_type="validation_error",
+                    outcome_known=True,
+                )
+
+        strategy = valid_strategy(producer)
+        approval = valid_strategy_approval(strategy)
+        adapter, attempt = RejectedFal(), {}
+        with self.assertRaises(producer.ExternalAdapterError):
+            producer.submit_authorized_generation(
+                strategy, approval, adapter, "fixture://source.png",
+                input_image_bytes=SOURCE_INPUT_BYTES, attempt_state=attempt,
+            )
+        self.assertEqual(attempt["state"], "provider_rejected")
+        self.assertEqual(attempt["providerFailure"], {
+            "statusCode": 422,
+            "errorType": "validation_error",
+        })
+        with self.assertRaises(producer.ContractError):
+            producer.submit_authorized_generation(
+                strategy, approval, adapter, "fixture://source.png",
+                input_image_bytes=SOURCE_INPUT_BYTES, attempt_state=attempt,
+            )
+        self.assertEqual(len(adapter.calls), 1)
+        schema = json.loads((
+            ROOT / "skills/meme-template-image-producer/references/contracts/generation-attempt.schema.json"
+        ).read_text(encoding="utf-8"))
+        Draft202012Validator(schema).validate(attempt)
+
+    def test_complete_fal_history_can_close_unknown_without_restoring_approval(self):
+        class UnknownFal(FakeFal):
+            def submit_edit(self, model, payload):
+                super().submit_edit(model, payload)
+                raise TimeoutError("outcome unknown")
+
+        strategy = valid_strategy(producer)
+        approval = valid_strategy_approval(strategy)
+        adapter, attempt = UnknownFal(), {}
+        with self.assertRaises(TimeoutError):
+            producer.submit_authorized_generation(
+                strategy, approval, adapter, "fixture://source.png",
+                input_image_bytes=SOURCE_INPUT_BYTES, attempt_state=attempt,
+            )
+        producer.record_no_request_reconciliation(attempt, {
+            "source": "fal_request_history",
+            "endpoint": "openai/gpt-image-2/edit",
+            "windowStart": "2026-08-29T07:25:00Z",
+            "windowEnd": "2026-08-29T07:35:00Z",
+            "checkedAt": "2026-08-29T07:36:00Z",
+            "queryComplete": True,
+            "observedRequestIds": [],
+        })
+        self.assertEqual(attempt["state"], "provider_rejected")
+        self.assertEqual(attempt["reconciliation"]["conclusion"], "no_request_created")
+        with self.assertRaises(producer.ContractError):
+            producer.submit_authorized_generation(
+                strategy, approval, adapter, "fixture://source.png",
+                input_image_bytes=SOURCE_INPUT_BYTES, attempt_state=attempt,
+            )
+        self.assertEqual(len(adapter.calls), 1)
+        schema = json.loads((
+            ROOT / "skills/meme-template-image-producer/references/contracts/generation-attempt.schema.json"
+        ).read_text(encoding="utf-8"))
+        Draft202012Validator(schema).validate(attempt)
+
     def test_revision_projection_is_read_only_and_does_not_inherit_verdict(self):
         history = [{
             "revision": 1,

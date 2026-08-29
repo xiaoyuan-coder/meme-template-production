@@ -16,7 +16,7 @@
     "inputUriSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "ruleVersion": {"type": "string", "minLength": 1},
     "revision": {"type": "integer", "minimum": 1},
-    "state": {"enum": ["submitting", "submission_unknown", "provider_pending", "provider_failed"]},
+    "state": {"enum": ["submitting", "submission_unknown", "provider_pending", "provider_rejected", "provider_failed"]},
     "model": {"const": "openai/gpt-image-2/edit"},
     "quality": {"const": "low"},
     "num_images": {"const": 1},
@@ -31,6 +31,44 @@
         "request_id": {"type": "string", "minLength": 1},
         "status": {"type": "string", "minLength": 1}
       }
+    },
+    "providerFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statusCode"],
+      "properties": {
+        "statusCode": {"type": "integer", "minimum": 400, "maximum": 599},
+        "errorType": {"type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,80}$"}
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source", "endpoint", "windowStart", "windowEnd", "checkedAt", "queryComplete",
+        "observedRequestIds", "observedRequestCount", "conclusion"
+      ],
+      "properties": {
+        "source": {"const": "fal_request_history"},
+        "endpoint": {"const": "openai/gpt-image-2/edit"},
+        "windowStart": {"type": "string", "format": "date-time"},
+        "windowEnd": {"type": "string", "format": "date-time"},
+        "checkedAt": {"type": "string", "format": "date-time"},
+        "queryComplete": {"const": true},
+        "observedRequestIds": {"type": "array", "maxItems": 0},
+        "observedRequestCount": {"const": 0},
+        "conclusion": {"const": "no_request_created"}
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"state": {"const": "provider_pending"}}},
+      "then": {"required": ["providerResponse"]}
+    },
+    {
+      "if": {"properties": {"state": {"const": "provider_rejected"}}},
+      "then": {"anyOf": [{"required": ["providerFailure"]}, {"required": ["reconciliation"]}]}
+    }
+  ]
 }

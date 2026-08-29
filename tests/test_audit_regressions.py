@@ -99,16 +99,29 @@ def json_approval(draft):
 
 class AuditRegressionTests(unittest.TestCase):
     def test_real_fal_factory_is_explicit_one_shot_and_redacted(self):
-        class Handle:
-            request_id = "provider-request-1"
+        class Response:
+            status_code = 202
 
-        class FakeFalClientModule:
+            @staticmethod
+            def json():
+                return {"request_id": "provider-request-1"}
+
+        class FakeHttpClient:
             def __init__(self):
                 self.calls = []
 
-            def submit(self, model, *, arguments):
-                self.calls.append((model, dict(arguments)))
-                return Handle()
+            def post(self, url, *, json):
+                self.calls.append((url, copy.deepcopy(json)))
+                return Response()
+
+        class FakeHttpxModule:
+            def __init__(self):
+                self.client = FakeHttpClient()
+                self.client_options = None
+
+            def Client(self, **options):
+                self.client_options = dict(options)
+                return self.client
 
         with self.assertRaises(producer.AdapterConfigurationError) as missing:
             producer.create_fal_adapter_from_environment({})
@@ -119,7 +132,7 @@ class AuditRegressionTests(unittest.TestCase):
                 module_loader=lambda _: (_ for _ in ()).throw(ModuleNotFoundError("secret")),
             )
         self.assertNotIn("must-never-appear", str(dependency.exception))
-        module = FakeFalClientModule()
+        module = FakeHttpxModule()
         adapter = producer.create_fal_adapter_from_environment(
             {"FAL_KEY": "must-never-appear"}, module_loader=lambda _: module
         )
@@ -132,16 +145,25 @@ class AuditRegressionTests(unittest.TestCase):
             "image_size": {"width": 1024, "height": 1024},
         })
         self.assertEqual(response, {"request_id": "provider-request-1", "status": "submitted"})
-        self.assertEqual(len(module.calls), 1)
-        self.assertNotIn("must-never-appear", json.dumps(module.calls))
+        self.assertEqual(len(module.client.calls), 1)
+        self.assertEqual(
+            module.client.calls[0][0],
+            "https://queue.fal.run/openai/gpt-image-2/edit",
+        )
+        self.assertNotIn("must-never-appear", json.dumps(module.client.calls))
+        self.assertEqual(module.client_options["timeout"], 120.0)
 
-        class FailingClient:
-            @staticmethod
-            def submit(model, *, arguments):
-                raise RuntimeError("FAL_KEY=provider-secret https://signed.invalid/?token=x")
+        class FailingHttpxModule:
+            class Client:
+                def __init__(self, **options):
+                    pass
+
+                @staticmethod
+                def post(url, *, json):
+                    raise RuntimeError("FAL_KEY=provider-secret https://signed.invalid/?token=x")
 
         failing = producer.create_fal_adapter_from_environment(
-            {"FAL_KEY": "provider-secret"}, module_loader=lambda _: FailingClient
+            {"FAL_KEY": "provider-secret"}, module_loader=lambda _: FailingHttpxModule
         )
         with self.assertRaises(producer.ExternalAdapterError) as failure:
             failing.submit_edit("openai/gpt-image-2/edit", {
@@ -151,6 +173,44 @@ class AuditRegressionTests(unittest.TestCase):
             })
         self.assertNotIn("provider-secret", str(failure.exception))
         self.assertNotIn("signed.invalid", str(failure.exception))
+
+    def test_fal_http_status_is_allowlisted_without_response_text(self):
+        class Response:
+            def __init__(self, status_code):
+                self.status_code = status_code
+
+            @staticmethod
+            def json():
+                return {
+                    "error_type": "validation_error",
+                    "detail": "FAL_KEY=provider-secret https://signed.invalid/?token=x",
+                }
+
+        class Client:
+            def __init__(self, status_code):
+                self.status_code = status_code
+                self.calls = []
+
+            def post(self, url, *, json):
+                self.calls.append((url, copy.deepcopy(json)))
+                return Response(self.status_code)
+
+        for status_code, outcome_known in ((422, True), (429, False), (503, False)):
+            with self.subTest(status_code=status_code):
+                client = Client(status_code)
+                adapter = producer.FalHttpEditAdapter(client)
+                with self.assertRaises(producer.ExternalAdapterError) as failure:
+                    adapter.submit_edit("openai/gpt-image-2/edit", {
+                        "image_urls": ["fixture://source.png"], "prompt": "safe replacement",
+                        "quality": "low", "num_images": 1, "output_format": "png",
+                        "image_size": {"width": 1024, "height": 1024},
+                    })
+                self.assertEqual(len(client.calls), 1)
+                self.assertEqual(failure.exception.status_code, status_code)
+                self.assertEqual(failure.exception.error_type, "validation_error")
+                self.assertEqual(failure.exception.outcome_known, outcome_known)
+                self.assertNotIn("provider-secret", str(failure.exception))
+                self.assertNotIn("signed.invalid", str(failure.exception))
 
     def test_meme_admin_registry_client_uses_the_frozen_local_endpoint_contract(self):
         class Transport:
