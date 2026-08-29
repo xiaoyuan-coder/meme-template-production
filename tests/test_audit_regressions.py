@@ -123,6 +123,21 @@ class AuditRegressionTests(unittest.TestCase):
                 self.client_options = dict(options)
                 return self.client
 
+        class FakeStorageClient:
+            def __init__(self):
+                self.calls = []
+
+            def upload(self, content, mime, *, file_name):
+                self.calls.append((content, mime, file_name))
+                return "https://v3.fal.media/files/approved-input.png"
+
+        class FakeFalClientModule:
+            def __init__(self):
+                self.client = FakeStorageClient()
+
+            def SyncClient(self, *, key):
+                return self.client
+
         with self.assertRaises(producer.AdapterConfigurationError) as missing:
             producer.create_fal_adapter_from_environment({})
         self.assertNotIn("FAL_KEY", str(missing.exception))
@@ -133,11 +148,13 @@ class AuditRegressionTests(unittest.TestCase):
             )
         self.assertNotIn("must-never-appear", str(dependency.exception))
         module = FakeHttpxModule()
+        storage = FakeFalClientModule()
         adapter = producer.create_fal_adapter_from_environment(
-            {"FAL_KEY": "must-never-appear"}, module_loader=lambda _: module
+            {"FAL_KEY": "must-never-appear"},
+            module_loader=lambda name: module if name == "httpx" else storage,
         )
         response = adapter.submit_edit("openai/gpt-image-2/edit", {
-            "image_urls": ["fixture://source.png"],
+            "image_urls": ["data:image/png;base64,iVBORw0KGgo="],
             "prompt": "safe replacement",
             "quality": "low",
             "num_images": 1,
@@ -146,9 +163,15 @@ class AuditRegressionTests(unittest.TestCase):
         })
         self.assertEqual(response, {"request_id": "provider-request-1", "status": "submitted"})
         self.assertEqual(len(module.client.calls), 1)
+        self.assertEqual(len(storage.client.calls), 1)
+        self.assertEqual(storage.client.calls[0][1:], ("image/png", "approved-input.png"))
         self.assertEqual(
             module.client.calls[0][0],
             "https://queue.fal.run/openai/gpt-image-2/edit",
+        )
+        self.assertEqual(
+            module.client.calls[0][1]["image_urls"],
+            ["https://v3.fal.media/files/approved-input.png"],
         )
         self.assertNotIn("must-never-appear", json.dumps(module.client.calls))
         self.assertEqual(module.client_options["timeout"], 120.0)
@@ -163,11 +186,12 @@ class AuditRegressionTests(unittest.TestCase):
                     raise RuntimeError("FAL_KEY=provider-secret https://signed.invalid/?token=x")
 
         failing = producer.create_fal_adapter_from_environment(
-            {"FAL_KEY": "provider-secret"}, module_loader=lambda _: FailingHttpxModule
+            {"FAL_KEY": "provider-secret"},
+            module_loader=lambda name: FailingHttpxModule if name == "httpx" else storage,
         )
         with self.assertRaises(producer.ExternalAdapterError) as failure:
             failing.submit_edit("openai/gpt-image-2/edit", {
-                "image_urls": ["fixture://source.png"], "prompt": "safe replacement",
+                "image_urls": ["https://v3.fal.media/files/source.png"], "prompt": "safe replacement",
                 "quality": "low", "num_images": 1, "output_format": "png",
                 "image_size": {"width": 1024, "height": 1024},
             })
@@ -201,7 +225,7 @@ class AuditRegressionTests(unittest.TestCase):
                 adapter = producer.FalHttpEditAdapter(client)
                 with self.assertRaises(producer.ExternalAdapterError) as failure:
                     adapter.submit_edit("openai/gpt-image-2/edit", {
-                        "image_urls": ["fixture://source.png"], "prompt": "safe replacement",
+                        "image_urls": ["https://v3.fal.media/files/source.png"], "prompt": "safe replacement",
                         "quality": "low", "num_images": 1, "output_format": "png",
                         "image_size": {"width": 1024, "height": 1024},
                     })

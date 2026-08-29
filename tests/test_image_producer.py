@@ -201,6 +201,41 @@ class ImageProducerTests(unittest.TestCase):
             )
         self.assertEqual(len(adapter.calls), 1)
 
+    def test_input_hosting_failure_can_resume_same_approval_before_generation_post(self):
+        class HostingFal(FakeFal):
+            def __init__(self):
+                super().__init__()
+                self.hosting_ready = False
+
+            def submit_edit(self, model, payload):
+                self.calls.append((model, payload))
+                if not self.hosting_ready:
+                    raise producer.InputHostingError("input hosting failed")
+                return {"request_id": "fake-request"}
+
+        strategy = valid_strategy(producer)
+        approval = valid_strategy_approval(strategy)
+        adapter, attempt = HostingFal(), {}
+        with self.assertRaises(producer.InputHostingError):
+            producer.submit_authorized_generation(
+                strategy, approval, adapter, "fixture://source.png",
+                input_image_bytes=SOURCE_INPUT_BYTES, attempt_state=attempt,
+            )
+        self.assertEqual(attempt["state"], "input_hosting_failed")
+        schema = json.loads((
+            ROOT / "skills/meme-template-image-producer/references/contracts/generation-attempt.schema.json"
+        ).read_text(encoding="utf-8"))
+        Draft202012Validator(schema).validate(attempt)
+
+        adapter.hosting_ready = True
+        response = producer.submit_authorized_generation(
+            strategy, approval, adapter, "fixture://source.png",
+            input_image_bytes=SOURCE_INPUT_BYTES, attempt_state=attempt,
+        )
+        self.assertEqual(response, {"request_id": "fake-request"})
+        self.assertEqual(attempt["state"], "provider_pending")
+        self.assertEqual(len(adapter.calls), 2)
+
     def test_provider_http_failure_is_redacted_classified_and_not_resubmitted(self):
         class RejectedFal(FakeFal):
             def submit_edit(self, model, payload):

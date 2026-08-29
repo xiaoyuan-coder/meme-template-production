@@ -54,6 +54,12 @@ class ExternalAdapterError(ContractError):
         self.outcome_known = outcome_known
 
 
+class InputHostingError(ContractError):
+    """Provider input hosting failed before a generation POST was attempted."""
+
+    code = "INPUT_HOSTING_FAILURE"
+
+
 class FalEditAdapter(Protocol):
     def submit_edit(self, model: str, payload: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
@@ -61,15 +67,18 @@ class FalEditAdapter(Protocol):
 class FalHttpEditAdapter:
     """One-shot FAL queue adapter; the injected HTTP client must not retry POSTs."""
 
-    def __init__(self, client: Any) -> None:
+    def __init__(self, client: Any, uploader: Callable[[bytes, str, str], str] | None = None) -> None:
         self._client = client
+        self._uploader = uploader
 
     def submit_edit(self, model: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         _validate_compiled_fal_payload(model, payload)
+        queue_payload = dict(payload)
+        queue_payload["image_urls"] = [self._host_input(payload["image_urls"][0])]
         try:
             response = self._client.post(
                 f"https://queue.fal.run/{model}",
-                json=dict(payload),
+                json=queue_payload,
             )
         except Exception as exc:
             request_id = getattr(exc, "request_id", None)
@@ -109,6 +118,22 @@ class FalHttpEditAdapter:
             raise ExternalAdapterError("FAL submission returned no request identity")
         return {"request_id": request_id, "status": "submitted"}
 
+    def _host_input(self, value: str) -> str:
+        if value.startswith(("https://", "http://")):
+            return value
+        match = re.fullmatch(r"data:(image/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)", value)
+        if match is None or self._uploader is None:
+            raise InputHostingError("FAL input hosting is unavailable")
+        mime = match.group(1)
+        try:
+            content = base64.b64decode(match.group(2), validate=True)
+            hosted = self._uploader(content, mime, f"approved-input.{mime.split('/')[1]}")
+        except Exception:
+            raise InputHostingError("FAL input hosting failed before generation submission") from None
+        if not isinstance(hosted, str) or not hosted.startswith("https://"):
+            raise InputHostingError("FAL input hosting returned no HTTPS URL")
+        return hosted
+
 
 def create_fal_adapter_from_environment(
     environ: Mapping[str, str] | None = None,
@@ -124,6 +149,10 @@ def create_fal_adapter_from_environment(
         httpx = module_loader("httpx")
     except (ImportError, ModuleNotFoundError):
         raise AdapterConfigurationError("httpx dependency is unavailable") from None
+    try:
+        fal_client = module_loader("fal_client")
+    except (ImportError, ModuleNotFoundError):
+        raise AdapterConfigurationError("fal-client storage dependency is unavailable") from None
     client_factory = getattr(httpx, "Client", None)
     if not callable(client_factory):
         raise AdapterConfigurationError("httpx dependency has no client seam")
@@ -134,7 +163,18 @@ def create_fal_adapter_from_environment(
     )
     if not callable(getattr(client, "post", None)):
         raise AdapterConfigurationError("httpx client has no POST seam")
-    return FalHttpEditAdapter(client)
+    storage_factory = getattr(fal_client, "SyncClient", None)
+    if not callable(storage_factory):
+        raise AdapterConfigurationError("fal-client storage dependency has no client seam")
+    storage_client = storage_factory(key=env["FAL_KEY"].strip())
+    upload = getattr(storage_client, "upload", None)
+    if not callable(upload):
+        raise AdapterConfigurationError("fal-client storage dependency has no upload seam")
+
+    def uploader(content: bytes, mime: str, file_name: str) -> str:
+        return upload(content, mime, file_name=file_name)
+
+    return FalHttpEditAdapter(client, uploader)
 
 
 _SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -777,14 +817,18 @@ def submit_authorized_generation(
         "ruleVersion": strategy["ruleVersion"],
         "revision": strategy["revision"],
     })
+    resume_after_hosting_failure = False
     if attempt_state:
         if attempt_state.get("requestIdentity") != request_identity:
             raise ContractError("generation attempt belongs to another approved strategy")
         if attempt_state.get("state") == "provider_pending":
             return dict(attempt_state["providerResponse"])
+        if attempt_state.get("state") == "input_hosting_failed":
+            resume_after_hosting_failure = True
         if attempt_state.get("state") in {"submitting", "submission_unknown"}:
             raise ContractError("submission outcome must be reconciled; resubmit prohibited")
-        raise ContractError("generation attempt state cannot authorize another submit")
+        if not resume_after_hosting_failure:
+            raise ContractError("generation attempt state cannot authorize another submit")
 
     generation = _contract()["generation"]
     request = {
@@ -796,24 +840,30 @@ def submit_authorized_generation(
         "input_image_url": provider_input,
         "prompt": strategy["prompt"],
     }
-    attempt_state.update({
-        "requestIdentity": request_identity,
-        "strategySha256": strategy_sha,
-        "promptSha256": prompt_sha,
-        "inputImageSha256": input_image_sha256,
-        "inputUriSha256": input_uri_sha,
-        "ruleVersion": strategy["ruleVersion"],
-        "revision": strategy["revision"],
-        "state": "submitting",
-        "model": generation["model"],
-        "quality": generation["quality"],
-        "num_images": generation["num_images"],
-        "output_format": generation["output_format"],
-        "image_size": strategy["image_size"],
-        "expectedFalCalls": 1,
-    })
+    if resume_after_hosting_failure:
+        attempt_state["state"] = "submitting"
+    else:
+        attempt_state.update({
+            "requestIdentity": request_identity,
+            "strategySha256": strategy_sha,
+            "promptSha256": prompt_sha,
+            "inputImageSha256": input_image_sha256,
+            "inputUriSha256": input_uri_sha,
+            "ruleVersion": strategy["ruleVersion"],
+            "revision": strategy["revision"],
+            "state": "submitting",
+            "model": generation["model"],
+            "quality": generation["quality"],
+            "num_images": generation["num_images"],
+            "output_format": generation["output_format"],
+            "image_size": strategy["image_size"],
+            "expectedFalCalls": 1,
+        })
     try:
         response = submit_generation_request(request, adapter)
+    except InputHostingError:
+        attempt_state["state"] = "input_hosting_failed"
+        raise
     except ExternalAdapterError as exc:
         attempt_state["state"] = "provider_rejected" if exc.outcome_known else "submission_unknown"
         if exc.status_code is not None:

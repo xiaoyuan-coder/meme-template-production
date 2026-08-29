@@ -16,7 +16,7 @@
     "inputUriSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "ruleVersion": {"type": "string", "minLength": 1},
     "revision": {"type": "integer", "minimum": 1},
-    "state": {"enum": ["submitting", "submission_unknown", "provider_pending", "provider_rejected", "provider_failed"]},
+    "state": {"enum": ["submitting", "input_hosting_failed", "submission_unknown", "provider_pending", "provider_rejected", "provider_failed"]},
     "model": {"const": "openai/gpt-image-2/edit"},
     "quality": {"const": "low"},
     "num_images": {"const": 1},
