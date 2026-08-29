@@ -1,19 +1,30 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://contracts.memebuy.cn/approved-image-analysis-v1.schema.json",
+  "$id": "https://contracts.memebuy.cn/approved-image-analysis-v2.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schemaVersion", "approvedImageSha256", "visualMechanism", "componentGraph",
+    "schemaVersion", "approvedImageSha256", "visualMechanism", "templateValue", "componentGraph",
     "identityTopology", "textRegions", "mediumComposition", "spatialRelations",
     "containers", "fixedStructure", "editableCandidates", "counts", "fieldEvidence",
     "titleEvidence", "tagEvidence", "slotEvidence", "promptCoverage",
-    "singleSlotExhaustion", "translationEquivalences", "semanticModel", "warnings"
+    "translationEquivalences", "semanticModel", "selfReview", "warnings"
   ],
   "properties": {
-    "schemaVersion": {"const": 1},
+    "schemaVersion": {"const": 2},
     "approvedImageSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "visualMechanism": {"type": "string", "minLength": 1},
+    "templateValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["whySelected", "templateHook", "fixedMechanism", "backendOnlyFacts"],
+      "properties": {
+        "whySelected": {"type": "string", "minLength": 1},
+        "templateHook": {"type": "string", "minLength": 1},
+        "fixedMechanism": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "backendOnlyFacts": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
     "componentGraph": {"type": "array", "minItems": 1, "items": {"type": "object"}},
     "identityTopology": {"type": "array", "items": {"type": "object"}},
     "textRegions": {"type": "array", "items": {"type": "object"}},
@@ -25,7 +36,7 @@
         "medium": {"type": "string", "minLength": 1},
         "styleTraits": {"type": "array", "minItems": 1},
         "composition": {"type": "array", "minItems": 1},
-        "colorAndLight": {"type": "array", "minItems": 1}
+        "colorAndLight": {"type": "array"}
       }
     },
     "spatialRelations": {"type": "array", "items": {"type": "object"}},
@@ -51,6 +62,18 @@
     "singleSlotExhaustion": {"type": "object"},
     "translationEquivalences": {"type": "array", "items": {"type": "object"}},
     "semanticModel": {"type": "object"},
+    "selfReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reviewedDraftSha256", "checks", "issuesFound", "revisionsApplied"],
+      "properties": {
+        "status": {"const": "PASS"},
+        "reviewedDraftSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "checks": {"type": "object"},
+        "issuesFound": {"type": "array", "maxItems": 0},
+        "revisionsApplied": {"type": "array"}
+      }
+    },
     "warnings": {"type": "array", "items": {"type": "object"}}
   }
 }

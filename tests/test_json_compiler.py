@@ -168,6 +168,9 @@ class GalleryAndOssTests(unittest.TestCase):
             revision=1,
         )
         self.assertEqual(package["approvedImageSha256"], image_sha)
+        self.assertEqual(package["assetState"]["status"], "planned_not_uploaded")
+        self.assertEqual(package["assetState"]["previewUri"], envelope["image"]["uri"])
+        self.assertEqual(package["assetState"]["plannedImmutableUrl"], package["formalPreview"]["cover"])
         self.assertEqual(package["objectSha256"], compiler.sha256_json(package["formalPreview"]))
         self.assertEqual(package["formalPreview"]["cover"], package["formalPreview"]["referenceImage"])
         analysis_schema = json.loads((
@@ -236,6 +239,175 @@ class GalleryAndOssTests(unittest.TestCase):
         with self.assertRaises(compiler.ContractError):
             compiler.validate_authoring_contract(analysis, internal_prompt, envelope)
 
+    def test_prompt_requires_real_placeholders_and_matching_defaults(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 1, "status": "approved",
+            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        for prompt in (
+            "双臂紧紧抱住画面中央的橘白猫。",
+            "双臂紧紧抱住画面中央的{{ subject | \"布偶猫\" }}。",
+        ):
+            with self.subTest(prompt=prompt):
+                draft = valid_formal_draft()
+                draft["promptTemplate"] = prompt
+                analysis = valid_approved_analysis(image_sha)
+                analysis["semanticModel"]["promptTemplate"] = prompt
+                analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
+                with self.assertRaises(compiler.ContractError):
+                    compiler.validate_authoring_contract(analysis, draft, envelope)
+
+    def test_official_major_tag_and_frozen_image_profile_are_required(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 1, "status": "approved",
+            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        no_major = valid_formal_draft()
+        no_major["metadata"]["tags"][0] = "宠物"
+        no_major_analysis = valid_approved_analysis(image_sha)
+        no_major_analysis["tagEvidence"]["宠物"] = no_major_analysis["tagEvidence"].pop("动物")
+        no_major_analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(no_major)
+        with self.assertRaises(compiler.ContractError):
+            compiler.validate_authoring_contract(no_major_analysis, no_major, envelope)
+
+        raised_minimum = valid_formal_draft()
+        raised_minimum["inputSchema"]["slots"][0]["image"]["minWidth"] = 512
+        raised_analysis = valid_approved_analysis(image_sha)
+        raised_analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(raised_minimum)
+        with self.assertRaises(compiler.ContractError):
+            compiler.validate_authoring_contract(raised_analysis, raised_minimum, envelope)
+
+    def test_supporting_detail_and_open_values_are_semantically_gated(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 1, "status": "approved",
+            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        supporting = valid_approved_analysis(image_sha)
+        supporting["editableCandidates"][0]["selectionReason"] = "visible_supporting_meal"
+        with self.assertRaises(compiler.ContractError):
+            compiler.validate_authoring_contract(supporting, valid_formal_draft(), envelope)
+
+        locked = valid_formal_draft()
+        locked["runtimeSemantics"]["visualContract"]["styleTraits"].append("中央固定为橘白猫")
+        locked_analysis = valid_approved_analysis(image_sha)
+        locked_analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(locked["runtimeSemantics"])
+        locked_analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(locked)
+        with self.assertRaises(compiler.ContractError):
+            compiler.validate_authoring_contract(locked_analysis, locked, envelope)
+
+    def test_text_slot_routing_and_self_review_sha_cannot_be_stale(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 1, "status": "approved",
+            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        unrouted = valid_approved_analysis(image_sha)
+        unrouted["textRegions"] = [{
+            "regionId": "left-label", "role": "content", "action": "open_slot",
+            "slotId": "missing_label", "language": "ko", "exactText": "왼쪽",
+            "layout": "单行箭头标签", "position": "左侧人物上方",
+        }]
+        with self.assertRaises(compiler.ContractError):
+            compiler.validate_authoring_contract(unrouted, valid_formal_draft(), envelope)
+
+        changed = valid_formal_draft()
+        changed["description"] = "替换画面中央主角"
+        stale = valid_approved_analysis(image_sha)
+        with self.assertRaises(compiler.ContractError):
+            compiler.validate_authoring_contract(stale, changed, envelope)
+
+    def test_distinct_arrow_labels_compile_as_independent_text_slots(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 1, "status": "approved",
+            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        draft = valid_formal_draft()
+        labels = {
+            "left_caption": ("左侧标签", "童年好友", ["我的姐姐", "最佳损友", "儿时玩伴"]),
+            "right_caption": ("右侧标签", "同桌伙伴", ["我的哥哥", "隔壁同学", "青梅竹马"]),
+        }
+        for slot_id, (label, default, suggestions) in labels.items():
+            draft["inputSchema"]["slots"].append({
+                "id": slot_id, "label": label, "required": False,
+                "text": {
+                    "allowCustom": True, "placeholder": f"输入{label}",
+                    "suggestions": suggestions, "defaultValue": default,
+                    "presentation": "suggestions",
+                },
+            })
+            target_id = slot_id.replace("caption", "label")
+            draft["runtimeSemantics"]["targetInstances"].append({
+                "id": target_id, "kind": "content_element", "role": label,
+                "region": f"{label[:2]}人物上方的箭头文字区域",
+            })
+            draft["runtimeSemantics"]["inputBindings"][slot_id] = {
+                "operation": "replace_content", "targetIds": [target_id],
+                "distributionPolicy": "replace_as_unit",
+            }
+        draft["promptTemplate"] = (
+            "{{ left_caption | \"童年好友\" }}标记左侧人物，"
+            "{{ right_caption | \"同桌伙伴\" }}标记右侧人物；"
+            "双臂紧紧抱住画面中央的{{ subject | \"橘白猫\" }}。"
+        )
+        draft["runtimeSemantics"]["visualContract"]["relations"].append(
+            "两段箭头文字分别指向左右人物"
+        )
+
+        analysis = valid_approved_analysis(image_sha)
+        analysis.pop("singleSlotExhaustion")
+        analysis["counts"]["inputControlCount"] = 3
+        analysis["textRegions"] = []
+        for slot_id, (label, default, suggestions) in labels.items():
+            target_id = slot_id.replace("caption", "label")
+            analysis["componentGraph"].append({
+                "componentId": target_id, "role": "arrow_label", "region": label,
+            })
+            analysis["editableCandidates"].append({
+                "slotId": slot_id, "componentId": target_id, "selected": True,
+                "selectionReason": "high_value_text", "exclusionReason": None,
+            })
+            analysis["textRegions"].append({
+                "regionId": target_id, "role": "content", "action": "open_slot",
+                "slotId": slot_id, "language": "zh-CN", "exactText": default,
+                "layout": "单行箭头标签", "position": label,
+            })
+            analysis["slotEvidence"][slot_id] = {
+                "userMotivation": True, "visuallyVisible": True,
+                "modelControllable": True, "mechanismPreserved": True,
+                "selectionReason": "high_value_text", "defaultValue": default,
+                "semanticAxis": f"{label}内容", "granularity": "人物关系短标签",
+                "inputModeDecision": {
+                    "modes": ["text"], "reason": "text_only",
+                    "evidence": "文字内容可直接编辑，无需视觉素材",
+                },
+                "suggestionChecks": [
+                    {"value": value, "sameAxis": True, "sameGranularity": True,
+                     "mechanismCompatible": True} for value in suggestions
+                ],
+                "openVisualFacts": [default, *suggestions],
+                "bindingKind": "replace_content",
+                "visualEvidence": f"{label}通过箭头建立人物关系叙事",
+            }
+            analysis["semanticModel"]["componentCoverage"][target_id] = {
+                "targetIds": [target_id], "visualContractFields": ["relations"],
+            }
+            analysis["semanticModel"]["dynamicFactSources"][slot_id] = f"inputSchema.slots.{slot_id}"
+        analysis["promptCoverage"]["slotIds"] = ["subject", *labels]
+        analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
+        analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(draft["runtimeSemantics"])
+        analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
+
+        compiler.validate_authoring_contract(analysis, draft, envelope)
+
     def test_dynamic_identity_group_requires_all_five_decisions(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
@@ -244,6 +416,9 @@ class GalleryAndOssTests(unittest.TestCase):
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         draft = valid_formal_draft()
+        del draft["inputSchema"]["slots"][0]["text"]
+        del draft["inputSchema"]["slots"][0]["resolutionStrategy"]
+        draft["promptTemplate"] = "{{ subject | \"家庭合照\" }}围拢在画面中央并保持紧密互动。"
         draft["runtimeSemantics"]["targetInstances"] = [{
             "id": "subject_group", "kind": "identity_group", "role": "中央合照群组",
             "region": "画面中央", "memberKind": "person", "minMembers": 2, "maxMembers": 8,
@@ -265,8 +440,12 @@ class GalleryAndOssTests(unittest.TestCase):
             {"identityUnitId": "subject", "instanceIds": ["subject_group"]}
         ]
         analysis["editableCandidates"] = [
-            {"slotId": "subject", "componentId": "subject_group"}
+            {
+                "slotId": "subject", "componentId": "subject_group", "selected": True,
+                "selectionReason": "identity_control", "exclusionReason": None,
+            }
         ]
+        analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
         analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(draft["runtimeSemantics"])
         analysis["semanticModel"]["componentCoverage"] = {
             "subject_group": {
@@ -278,6 +457,13 @@ class GalleryAndOssTests(unittest.TestCase):
         }
         analysis["semanticModel"]["completeRedrawByTarget"] = {"subject_group": True}
         analysis["slotEvidence"]["subject"]["bindingKind"] = "preserve_group"
+        analysis["slotEvidence"]["subject"]["defaultValue"] = "家庭合照"
+        analysis["slotEvidence"]["subject"]["inputModeDecision"] = {
+            "modes": ["image"], "reason": "dynamic_group",
+            "evidence": "用户自然拥有成员同框且人数可变的家庭合照",
+        }
+        analysis["slotEvidence"]["subject"]["suggestionChecks"] = []
+        analysis["slotEvidence"]["subject"]["openVisualFacts"] = ["家庭合照"]
         analysis["slotEvidence"]["subject"]["groupDecision"] = {
             "wholeGroupIdentityFidelity": True,
             "groupPhotoNaturalInput": True,
@@ -285,6 +471,7 @@ class GalleryAndOssTests(unittest.TestCase):
             "sameMemberKind": True,
             "noIndividuallyAddressableRoles": True,
         }
+        analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
         compiler.validate_authoring_contract(analysis, draft, envelope)
         invalid = copy.deepcopy(analysis)
         invalid["slotEvidence"]["subject"]["groupDecision"]["variableMemberCount"] = False

@@ -4,9 +4,9 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "state", "approvedImage", "frozenCandidateKey", "registry", "analysisSummary",
+    "state", "approvedImage", "frozenCandidateKey", "registry", "assetState", "analysisSummary", "templateValue",
     "titleEvidence", "tagEvidence", "slotCards", "copy", "slots", "promptTemplate", "warnings",
-    "promptCoverage", "runtimeSummary",
+    "promptCoverage", "runtimeSummary", "selfReview",
     "formalPreview", "objectSha256", "approvedImageSha256", "ruleVersion", "revision"
   ],
   "properties": {
@@ -14,7 +14,18 @@
     "approvedImage": {"type": "object"},
     "frozenCandidateKey": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,59}$"},
     "registry": {"type": "object"},
+    "assetState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "previewUri", "plannedImmutableUrl"],
+      "properties": {
+        "status": {"const": "planned_not_uploaded"},
+        "previewUri": {"type": "string", "minLength": 1},
+        "plannedImmutableUrl": {"type": "string", "format": "uri"}
+      }
+    },
     "analysisSummary": {"type": "object"},
+    "templateValue": {"type": "object"},
     "titleEvidence": {"type": "object"},
     "tagEvidence": {"type": "object"},
     "slotCards": {"type": "object"},
@@ -24,6 +35,7 @@
     "warnings": {"type": "array"},
     "promptCoverage": {"type": "object"},
     "runtimeSummary": {"type": "object"},
+    "selfReview": {"type": "object"},
     "formalPreview": {"type": "object"},
     "objectSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "approvedImageSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},

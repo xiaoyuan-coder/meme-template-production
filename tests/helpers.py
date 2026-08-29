@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import hashlib
+import json
 from pathlib import Path
 from types import ModuleType
 
@@ -21,27 +22,35 @@ def valid_formal_draft(key: str = "hug-your-pet") -> dict:
     return {
         "key": key,
         "status": "DRAFT",
-        "title": "抱紧你的搭档",
-        "description": "换上你的角色来拥抱",
+        "title": "紧紧抱住画面主角",
+        "description": "替换中央主角",
         "imageSize": "1024x1024",
         "imageN": 1,
         "kind": "PROMPT",
-        "promptTemplate": "将上传的主体绘制在画面中央，保持拥抱动作、层次关系与手绘媒介。",
+        "promptTemplate": "双臂紧紧抱住画面中央的{{ subject | \"橘白猫\" }}。",
         "inputSchema": {
             "version": 2,
             "slots": [{
                 "id": "subject",
                 "label": "主体",
-                "required": True,
+                "required": False,
+                "text": {
+                    "allowCustom": True,
+                    "placeholder": "输入中央主体，或上传1张清晰主体图",
+                    "suggestions": ["三花猫", "银渐层猫", "黑白奶牛猫"],
+                    "defaultValue": "橘白猫",
+                    "presentation": "suggestions",
+                },
                 "image": {
-                    "promptValue": "用户上传的主体",
+                    "promptValue": "图片中的中央主体",
                     "hint": "上传单个人物或宠物",
                     "maxCount": 1,
-                    "minWidth": 512,
-                    "minHeight": 512,
+                    "minWidth": 256,
+                    "minHeight": 256,
                     "private": True,
-                    "sourceOptions": ["upload"],
+                    "sourceOptions": ["upload", "recent_upload", "asset_library"],
                 },
+                "resolutionStrategy": "image_over_text",
             }],
         },
         "preprocessSteps": [],
@@ -68,11 +77,14 @@ def valid_formal_draft(key: str = "hug-your-pet") -> dict:
                 "medium": "温暖手绘插画",
                 "styleTraits": ["简洁线条"],
                 "composition": ["主体居中"],
-                "relations": ["保持拥抱接触"],
+                "relations": [
+                    "保持拥抱接触",
+                    "身份目标完整重绘并统一为温暖手绘媒介",
+                ],
                 "colorAndLight": ["柔和暖色光"],
             },
         },
-        "metadata": {"tags": ["拥抱", "宠物", "手绘", "温暖", "互动"]},
+        "metadata": {"tags": ["动物", "拥抱", "手绘", "温暖", "互动"]},
     }
 
 
@@ -198,11 +210,20 @@ def valid_approved_analysis(image_sha: str) -> dict:
         "defaults", "text", "subjectsAndIdentityBindings", "promptTemplate",
         "visualContract", "inputBindings", "clothingOwnership", "cover", "referenceImage",
     ]
-    tags = ["拥抱", "宠物", "手绘", "温暖", "互动"]
+    tags = ["动物", "拥抱", "手绘", "温暖", "互动"]
+    draft_sha = hashlib.sha256(json.dumps(
+        draft, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")).hexdigest()
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "approvedImageSha256": image_sha,
         "visualMechanism": "中央主体紧抱宠物的温暖手绘场景",
+        "templateValue": {
+            "whySelected": "拥抱关系明确，替换中央主体后仍有直观情绪价值",
+            "templateHook": "把中央被拥抱对象换成用户指定的主体",
+            "fixedMechanism": ["双臂从前方紧抱中央主体", "中央近景构图"],
+            "backendOnlyFacts": ["身份目标完整重绘并统一为温暖手绘媒介"],
+        },
         "componentGraph": [
             {"componentId": "subject_main", "role": "identity_subject", "region": "center"}
         ],
@@ -217,7 +238,10 @@ def valid_approved_analysis(image_sha: str) -> dict:
         "spatialRelations": [{"type": "hug_contact", "members": ["subject_main"]}],
         "containers": [],
         "fixedStructure": ["centered-hug", "warm-handdrawn-medium"],
-        "editableCandidates": [{"slotId": "subject", "componentId": "subject_main"}],
+        "editableCandidates": [{
+            "slotId": "subject", "componentId": "subject_main", "selected": True,
+            "selectionReason": "identity_control", "exclusionReason": None,
+        }],
         "counts": {
             "identityCount": 1,
             "visualInstanceCount": 1,
@@ -236,7 +260,7 @@ def valid_approved_analysis(image_sha: str) -> dict:
             tag: {
                 "visualEvidence": f"图中可见{tag}特征",
                 "category": {
-                    "拥抱": "mechanism", "宠物": "subject", "手绘": "medium",
+                    "动物": "subject", "拥抱": "mechanism", "手绘": "medium",
                     "温暖": "emotion", "互动": "relation",
                 }[tag],
             }
@@ -248,6 +272,23 @@ def valid_approved_analysis(image_sha: str) -> dict:
                 "visuallyVisible": True,
                 "modelControllable": True,
                 "mechanismPreserved": True,
+                "selectionReason": "identity_control",
+                "defaultValue": "橘白猫",
+                "semanticAxis": "中央被拥抱主体的身份",
+                "granularity": "单一主体类型",
+                "inputModeDecision": {
+                    "modes": ["text", "image"],
+                    "reason": "identity_subject",
+                    "evidence": "中央主体清晰可寻址，用户会自然提供单主体图片",
+                },
+                "suggestionChecks": [
+                    {"value": value, "sameAxis": True, "sameGranularity": True,
+                     "mechanismCompatible": True}
+                    for value in ("三花猫", "银渐层猫", "黑白奶牛猫")
+                ],
+                "openVisualFacts": [
+                    "橘白猫", "三花猫", "银渐层猫", "黑白奶牛猫",
+                ],
                 "bindingKind": "one_to_one",
                 "inheritFromUpload": ["可辨认身份特征", "服装", "表情"],
                 "keepFromTemplate": ["拥抱动作"],
@@ -287,6 +328,21 @@ def valid_approved_analysis(image_sha: str) -> dict:
             "dynamicFactSources": {"subject": "inputSchema.slots.subject"},
             "completeRedrawByTarget": {"subject_main": True},
             "sourceIsolationByInput": {"subject": True},
+        },
+        "selfReview": {
+            "status": "PASS",
+            "reviewedDraftSha256": draft_sha,
+            "checks": {
+                check: True for check in (
+                    "templateValueFocused", "slotScopeMinimal", "imageModesJustified",
+                    "groupPolicyJustified", "textRoutingComplete", "titlePortable",
+                    "promptUserFacing", "placeholdersExact",
+                    "suggestionsSubstituteNaturally", "tagsValid",
+                    "visualContractRespectsInputs",
+                )
+            },
+            "issuesFound": [],
+            "revisionsApplied": [],
         },
         "warnings": [],
     }

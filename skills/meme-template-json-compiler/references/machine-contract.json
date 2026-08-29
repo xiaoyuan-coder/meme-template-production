@@ -45,6 +45,10 @@
     "tagMinimum": 5,
     "tagMaximum": 8,
     "tagMaxLength": 12,
+    "majorTagValues": [
+      "人物", "动物", "二次元", "粉丝应援", "情侣", "亲子家庭", "美食",
+      "风景建筑", "搞怪meme", "文字设计", "创意艺术"
+    ],
     "expectedEvidenceFields": [
       "key", "title", "description", "tags", "imageSize", "slots", "suggestions",
       "defaults", "text", "subjectsAndIdentityBindings", "promptTemplate",
@@ -55,13 +59,32 @@
     ],
     "internalPromptTerms": [
       "runtimeSemantics", "visualContract", "inputBindings", "targetInstances",
-      "clothingOwnership", "后端合同", "治理门禁", "内部 ID"
+      "clothingOwnership", "后端合同", "治理门禁", "内部 ID",
+      "用户上传图", "上传图中", "从零完整重绘", "接管目标"
     ],
+    "internalVisualContractTerms": ["主体槽", "图片槽", "文字槽", "独立槽位"],
     "allowedTextActions": ["open_slot", "free_editable", "preserve", "remove", "review"],
     "textRoles": ["identity", "content", "attribution", "watermark", "brand", "ambiguous"],
     "tagCategories": ["mechanism", "subject", "scene", "medium", "emotion", "use_case", "text", "relation"],
     "singleSlotAxes": [
       "subject", "text", "object", "clothing", "color", "prop", "scene", "nested_content"
+    ],
+    "allowedSlotSelectionReasons": [
+      "identity_control", "template_hook", "high_value_text", "exact_content_asset"
+    ],
+    "slotDefaults": {
+      "required": false,
+      "resolutionStrategy": "image_over_text",
+      "minWidth": 256,
+      "minHeight": 256,
+      "maxCount": 1,
+      "sourceOptions": ["upload", "recent_upload", "asset_library"]
+    },
+    "selfReviewChecks": [
+      "templateValueFocused", "slotScopeMinimal", "imageModesJustified",
+      "groupPolicyJustified", "textRoutingComplete", "titlePortable",
+      "promptUserFacing", "placeholdersExact", "suggestionsSubstituteNaturally",
+      "tagsValid", "visualContractRespectsInputs"
     ],
     "semanticCompiler": "compile_semantics_from_analysis"
   },

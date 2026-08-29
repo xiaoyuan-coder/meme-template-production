@@ -362,6 +362,21 @@ def _non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
+def _flatten_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        return "\n".join(_flatten_text(item) for item in value.values())
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return "\n".join(_flatten_text(item) for item in value)
+    return ""
+
+
+_PROMPT_SLOT = re.compile(
+    r'\{\{\s*([a-z][a-z0-9_]*)\s*\|\s*"([^"{}]*)"\s*\}\}'
+)
+
+
 def validate_approved_image_analysis(
     analysis: Mapping[str, Any], approved_image: Mapping[str, Any]
 ) -> None:
@@ -370,21 +385,36 @@ def validate_approved_image_analysis(
     validate_approved_image_envelope(approved_image)
     required = {
         "schemaVersion", "approvedImageSha256", "visualMechanism", "componentGraph",
+        "templateValue",
         "identityTopology", "textRegions", "mediumComposition", "spatialRelations",
         "containers", "fixedStructure", "editableCandidates", "counts", "fieldEvidence",
         "titleEvidence", "tagEvidence", "slotEvidence", "promptCoverage",
-        "singleSlotExhaustion", "translationEquivalences", "semanticModel", "warnings",
+        "translationEquivalences", "semanticModel", "selfReview",
+        "warnings",
     }
-    if set(analysis) != required:
+    allowed = required | {"singleSlotExhaustion"}
+    if not required.issubset(analysis) or not set(analysis).issubset(allowed):
         raise ContractError(
             f"approved image analysis fields mismatch; missing={sorted(required - analysis.keys())}, "
-            f"extra={sorted(analysis.keys() - required)}"
+            f"extra={sorted(analysis.keys() - allowed)}"
         )
-    if analysis["schemaVersion"] != 1:
-        raise ContractError("approved image analysis schemaVersion must be 1")
+    if analysis["schemaVersion"] != 2:
+        raise ContractError("approved image analysis schemaVersion must be 2")
     if analysis["approvedImageSha256"] != approved_image["image"]["sha256"]:
         raise ContractError("approved image analysis belongs to another image")
     _non_empty_text(analysis["visualMechanism"], "visualMechanism")
+    template_value = analysis["templateValue"]
+    if not isinstance(template_value, Mapping) or set(template_value) != {
+        "whySelected", "templateHook", "fixedMechanism", "backendOnlyFacts"
+    }:
+        raise ContractError("templateValue must explain selection, hook, mechanism, and backend facts")
+    _non_empty_text(template_value["whySelected"], "templateValue.whySelected")
+    _non_empty_text(template_value["templateHook"], "templateValue.templateHook")
+    for name in ("fixedMechanism", "backendOnlyFacts"):
+        if not isinstance(template_value[name], list) or not template_value[name] or not all(
+            isinstance(item, str) and item.strip() for item in template_value[name]
+        ):
+            raise ContractError(f"templateValue.{name} must contain concrete facts")
     for name in (
         "componentGraph", "identityTopology", "textRegions", "spatialRelations",
         "containers", "fixedStructure", "editableCandidates", "warnings",
@@ -406,8 +436,10 @@ def validate_approved_image_analysis(
         raise ContractError("mediumComposition is incomplete")
     _non_empty_text(medium["medium"], "mediumComposition.medium")
     for name in ("styleTraits", "composition", "colorAndLight"):
-        if not isinstance(medium[name], list) or not medium[name]:
-            raise ContractError(f"mediumComposition.{name} must be non-empty")
+        if not isinstance(medium[name], list):
+            raise ContractError(f"mediumComposition.{name} must be an array")
+    if not medium["styleTraits"] or not medium["composition"]:
+        raise ContractError("mediumComposition requires style and composition facts")
     evidence = analysis["fieldEvidence"]
     expected = set(_contract()["authoring"]["expectedEvidenceFields"])
     if not isinstance(evidence, Mapping) or set(evidence) != expected:
@@ -510,6 +542,31 @@ def compile_semantics_from_analysis(analysis: Mapping[str, Any]) -> dict[str, An
     }
 
 
+def _validate_single_slot_exhaustion(exhaustion: Any, slot_id: str) -> None:
+    axes = {"subject", "text", "object", "clothing", "color", "prop", "scene", "nested_content"}
+    if (
+        not isinstance(exhaustion, Mapping)
+        or set(exhaustion) != {"selectedSlotIds", "axes"}
+        or exhaustion.get("selectedSlotIds") != [slot_id]
+        or not isinstance(exhaustion.get("axes"), Mapping)
+        or set(exhaustion["axes"]) != axes
+    ):
+        raise ContractError("single-slot exhaustion evidence must cover every candidate axis")
+    occurrences = 0
+    for axis, axis_evidence in exhaustion["axes"].items():
+        if not isinstance(axis_evidence, Mapping) or set(axis_evidence) != {"candidateSlotIds", "evidence"}:
+            raise ContractError(f"single-slot exhaustion axis {axis} is incomplete")
+        _non_empty_text(axis_evidence["evidence"], f"single-slot exhaustion {axis}")
+        candidates = axis_evidence["candidateSlotIds"]
+        if not isinstance(candidates, list) or any(candidate != slot_id for candidate in candidates):
+            raise ContractError("single-slot exhaustion names an unknown slot")
+        if len(candidates) > 1:
+            raise ContractError("single-slot exhaustion repeats its selected slot")
+        occurrences += len(candidates)
+    if occurrences != 1:
+        raise ContractError("single-slot exhaustion must account for the selected slot exactly once")
+
+
 def _validate_text_regions(regions: Sequence[Mapping[str, Any]]) -> None:
     authoring = _contract()["authoring"]
     seen: set[str] = set()
@@ -559,7 +616,6 @@ def validate_authoring_contract(
     tag_evidence = analysis["tagEvidence"]
     if not isinstance(tag_evidence, Mapping) or set(tag_evidence) != set(tags):
         raise ContractError("every tag requires image evidence")
-    category_seen = False
     for tag, evidence in tag_evidence.items():
         if not isinstance(evidence, Mapping):
             raise ContractError(f"tag evidence for {tag} must be an object")
@@ -567,9 +623,8 @@ def validate_authoring_contract(
         category = evidence.get("category")
         if category not in authoring["tagCategories"]:
             raise ContractError("tag category is invalid")
-        category_seen = category_seen or category in {"mechanism", "subject", "scene", "medium"}
-    if not category_seen:
-        raise ContractError("tags require at least one stable classification category")
+    if not set(tags).intersection(authoring["majorTagValues"]):
+        raise ContractError("tags require at least one exact official major category")
     slots = formal_draft.get("inputSchema", {}).get("slots", [])
     if not isinstance(slots, list) or not slots:
         raise ContractError("inputSchema requires at least one slot")
@@ -580,6 +635,8 @@ def validate_authoring_contract(
     if not isinstance(slot_evidence, Mapping) or set(slot_evidence) != set(slot_ids):
         raise ContractError("every slot requires independent high-value evidence")
     bindings = formal_draft.get("runtimeSemantics", {}).get("inputBindings", {})
+    if not isinstance(bindings, Mapping) or set(bindings) != set(slot_ids):
+        raise ContractError("every slot requires exactly one runtime input binding")
     compiled = compile_semantics_from_analysis(analysis)
     if (
         formal_draft.get("promptTemplate") != compiled["promptTemplate"]
@@ -595,32 +652,10 @@ def validate_authoring_contract(
         slot["id"] for slot in slots if slot.get("image") is not None
     } or any(value is not True for value in semantic_model["sourceIsolationByInput"].values()):
         raise ContractError("every image input requires source-isolation evidence")
-    exhaustion = analysis["singleSlotExhaustion"]
-    axes = {"subject", "text", "object", "clothing", "color", "prop", "scene", "nested_content"}
-    if (
-        not isinstance(exhaustion, Mapping)
-        or set(exhaustion) != {"selectedSlotIds", "axes"}
-        or set(exhaustion.get("selectedSlotIds", [])) != set(slot_ids)
-        or not isinstance(exhaustion.get("axes"), Mapping)
-        or set(exhaustion["axes"]) != axes
-    ):
-        raise ContractError("single-slot exhaustion evidence must cover every candidate axis")
-    exhausted_candidates: set[str] = set()
-    candidate_occurrences: dict[str, int] = {slot_id: 0 for slot_id in slot_ids}
-    for axis, axis_evidence in exhaustion["axes"].items():
-        if not isinstance(axis_evidence, Mapping) or set(axis_evidence) != {"candidateSlotIds", "evidence"}:
-            raise ContractError(f"single-slot exhaustion axis {axis} is incomplete")
-        _non_empty_text(axis_evidence["evidence"], f"single-slot exhaustion {axis}")
-        candidates = axis_evidence["candidateSlotIds"]
-        if not isinstance(candidates, list) or any(candidate not in slot_ids for candidate in candidates):
-            raise ContractError("single-slot exhaustion names an unknown slot")
-        if len(set(candidates)) != len(candidates):
-            raise ContractError("single-slot exhaustion repeats a slot within one axis")
-        for candidate in candidates:
-            candidate_occurrences[candidate] += 1
-        exhausted_candidates.update(candidates)
-    if exhausted_candidates != set(slot_ids) or any(count != 1 for count in candidate_occurrences.values()):
-        raise ContractError("single-slot exhaustion does not account for every selected slot")
+    if len(slot_ids) == 1:
+        _validate_single_slot_exhaustion(analysis.get("singleSlotExhaustion"), slot_ids[0])
+    elif "singleSlotExhaustion" in analysis:
+        raise ContractError("singleSlotExhaustion is only valid for a one-slot template")
 
     targets = formal_draft.get("runtimeSemantics", {}).get("targetInstances", [])
     target_ids = {target.get("id") for target in targets if isinstance(target, Mapping)}
@@ -660,13 +695,21 @@ def validate_authoring_contract(
     editable_slot_ids: list[str] = []
     component_ids = {component["componentId"] for component in analysis["componentGraph"]}
     for candidate in analysis["editableCandidates"]:
-        if (
-            not isinstance(candidate, Mapping)
-            or candidate.get("componentId") not in component_ids
-            or not isinstance(candidate.get("slotId"), str)
-        ):
-            raise ContractError("editableCandidates references an unknown component or slot")
-        editable_slot_ids.append(candidate["slotId"])
+        if not isinstance(candidate, Mapping) or candidate.get("componentId") not in component_ids:
+            raise ContractError("editableCandidates references an unknown component")
+        if candidate.get("selected") is True:
+            if (
+                not isinstance(candidate.get("slotId"), str)
+                or candidate.get("selectionReason") not in authoring["allowedSlotSelectionReasons"]
+                or candidate.get("exclusionReason") is not None
+            ):
+                raise ContractError("selected editable candidate lacks a valid slot reason")
+            editable_slot_ids.append(candidate["slotId"])
+        elif candidate.get("selected") is False:
+            if candidate.get("slotId") is not None or not isinstance(candidate.get("exclusionReason"), str):
+                raise ContractError("excluded editable candidate requires an exclusion reason and no slot")
+        else:
+            raise ContractError("editable candidate must state whether it was selected")
     if set(editable_slot_ids) != set(slot_ids) or len(editable_slot_ids) != len(set(editable_slot_ids)):
         raise ContractError("editableCandidates must account for every compiled slot")
     has_open_identity = False
@@ -678,20 +721,72 @@ def validate_authoring_contract(
         ):
             raise ContractError(f"slot {slot['id']} failed the high-value gate")
         _non_empty_text(evidence.get("visualEvidence"), f"slot evidence {slot['id']}")
+        if evidence.get("selectionReason") not in authoring["allowedSlotSelectionReasons"]:
+            raise ContractError(f"slot {slot['id']} lacks an allowed selection reason")
+        for name in ("defaultValue", "semanticAxis", "granularity"):
+            _non_empty_text(evidence.get(name), f"slot evidence {slot['id']}.{name}")
+        open_facts = evidence.get("openVisualFacts")
+        if not isinstance(open_facts, list) or not open_facts or not all(
+            isinstance(fact, str) and fact.strip() for fact in open_facts
+        ):
+            raise ContractError(f"slot {slot['id']} requires openVisualFacts")
+        if slot.get("required") is not authoring["slotDefaults"]["required"]:
+            raise ContractError("all production slots must remain optional")
         text_mode = slot.get("text")
-        if text_mode is not None and len(text_mode.get("suggestions", [])) != 3:
-            raise ContractError("text-mode slots require exactly three suggestions")
-        if slot.get("image") is not None:
-            binding = bindings.get(slot["id"])
-            if not isinstance(binding, Mapping):
-                raise ContractError("every image slot requires a runtime input binding")
-            binding_kind = (
-                binding.get("bindingPolicy")
-                if binding.get("operation") == "replace_identity"
-                else "replace_content"
-            )
-            if evidence.get("bindingKind") != binding_kind:
-                raise ContractError("slot evidence binding kind differs from runtime semantics")
+        suggestions = text_mode.get("suggestions", []) if isinstance(text_mode, Mapping) else []
+        suggestion_checks = evidence.get("suggestionChecks")
+        if text_mode is not None:
+            if len(suggestions) != 3 or len(set(suggestions)) != 3:
+                raise ContractError("text-mode slots require exactly three unique suggestions")
+            if text_mode.get("defaultValue") != evidence["defaultValue"]:
+                raise ContractError("slot default differs from independent slot evidence")
+            if not isinstance(suggestion_checks, list) or [item.get("value") for item in suggestion_checks] != suggestions:
+                raise ContractError("suggestion checks must correspond to the authored recommendations")
+            if any(
+                not isinstance(item, Mapping)
+                or any(item.get(name) is not True for name in (
+                    "sameAxis", "sameGranularity", "mechanismCompatible"
+                ))
+                for item in suggestion_checks
+            ):
+                raise ContractError("recommendations must pass axis, granularity, and mechanism checks")
+            if not {evidence["defaultValue"], *suggestions}.issubset(set(open_facts)):
+                raise ContractError("openVisualFacts must include the default and all recommendations")
+        elif suggestion_checks not in ([], None):
+            raise ContractError("pure-image slots cannot carry text recommendation checks")
+        image_mode = slot.get("image")
+        actual_modes = [name for name, value in (("text", text_mode), ("image", image_mode)) if value is not None]
+        mode_decision = evidence.get("inputModeDecision")
+        if (
+            not isinstance(mode_decision, Mapping)
+            or mode_decision.get("modes") != actual_modes
+            or mode_decision.get("reason") not in {
+                "identity_subject", "dynamic_group", "text_only", "exact_content_asset"
+            }
+        ):
+            raise ContractError("slot input modes require a matching explicit decision")
+        _non_empty_text(mode_decision.get("evidence"), "slot input-mode evidence")
+        binding = bindings.get(slot["id"])
+        if not isinstance(binding, Mapping):
+            raise ContractError("every slot requires a runtime input binding")
+        binding_kind = (
+            binding.get("bindingPolicy")
+            if binding.get("operation") == "replace_identity"
+            else "replace_content"
+        )
+        if evidence.get("bindingKind") != binding_kind:
+            raise ContractError("slot evidence binding kind differs from runtime semantics")
+        if image_mode is not None:
+            defaults = authoring["slotDefaults"]
+            if (
+                image_mode.get("maxCount") != defaults["maxCount"]
+                or image_mode.get("minWidth") != defaults["minWidth"]
+                or image_mode.get("minHeight") != defaults["minHeight"]
+                or set(image_mode.get("sourceOptions", [])) != set(defaults["sourceOptions"])
+            ):
+                raise ContractError("image slots must use the frozen upload profile")
+            if text_mode is not None and slot.get("resolutionStrategy") != defaults["resolutionStrategy"]:
+                raise ContractError("composite image/text slots require image_over_text")
             if binding.get("operation") == "replace_identity":
                 has_open_identity = True
                 if any(
@@ -710,6 +805,10 @@ def validate_authoring_contract(
                 if evidence.get("clothingOwnership") != binding.get("clothingOwnership"):
                     raise ContractError("slot clothing ownership differs from its runtime binding")
                 if binding_kind == "preserve_group":
+                    if text_mode is not None or mode_decision.get("reason") != "dynamic_group":
+                        raise ContractError("dynamic groups must use an image-only group-photo input")
+                    if binding.get("allowedSourceGrouping") != ["group_photo"]:
+                        raise ContractError("dynamic groups only accept a natural group photo")
                     group = evidence.get("groupDecision")
                     required_group_facts = {
                         "wholeGroupIdentityFidelity", "groupPhotoNaturalInput", "variableMemberCount",
@@ -717,11 +816,24 @@ def validate_authoring_contract(
                     }
                     if not isinstance(group, Mapping) or any(group.get(name) is not True for name in required_group_facts):
                         raise ContractError("preserve_group requires all five dynamic-group decisions")
+                elif text_mode is None or mode_decision.get("reason") != "identity_subject":
+                    raise ContractError("addressable identity subjects require text and image modes")
+            elif evidence.get("selectionReason") != "exact_content_asset" or mode_decision.get("reason") != "exact_content_asset":
+                raise ContractError("non-identity image inputs require exact-content-asset evidence")
+        elif binding.get("operation") == "replace_identity":
+            raise ContractError("identity replacement requires an image input")
+        elif mode_decision.get("reason") != "text_only":
+            raise ContractError("ordinary content slots should remain text-only")
     if has_open_identity and any(
         region.get("role") == "identity" and region.get("action") == "preserve"
         for region in analysis["textRegions"]
     ):
         raise ContractError("open identity slots cannot preserve specific identity text")
+    text_slot_ids = {slot["id"] for slot in slots if slot.get("text") is not None}
+    for region in analysis["textRegions"]:
+        if region.get("action") == "open_slot":
+            if region.get("slotId") not in text_slot_ids:
+                raise ContractError("open text regions must name a text-capable slot")
     identity_target_ids = {
         target_id
         for binding in bindings.values()
@@ -734,6 +846,20 @@ def validate_authoring_contract(
     for term in authoring["internalPromptTerms"]:
         if term.casefold() in prompt.casefold():
             raise ContractError("promptTemplate exposes internal backend terminology")
+    placeholders = _PROMPT_SLOT.findall(prompt)
+    if prompt.count("{{") != len(placeholders) or prompt.count("}}") != len(placeholders):
+        raise ContractError("promptTemplate contains a malformed slot placeholder")
+    placeholder_ids = [slot_id for slot_id, _ in placeholders]
+    if len(placeholders) != len(slots) or sorted(placeholder_ids) != sorted(slot_ids):
+        raise ContractError("promptTemplate must contain every slot exactly once")
+    fallbacks = {slot_id: fallback for slot_id, fallback in placeholders}
+    for slot in slots:
+        expected_fallback = (
+            slot["text"]["defaultValue"] if slot.get("text") is not None
+            else slot_evidence[slot["id"]]["defaultValue"]
+        )
+        if fallbacks[slot["id"]] != expected_fallback:
+            raise ContractError("promptTemplate fallback must equal the authored slot default")
     prompt_coverage = analysis["promptCoverage"]
     if not isinstance(prompt_coverage, Mapping) or prompt_coverage.get("allEditableContentCovered") is not True:
         raise ContractError("promptTemplate must cover every editable content item")
@@ -748,6 +874,37 @@ def validate_authoring_contract(
     }
     if set(prompt_coverage["freeEditableRegionIds"]) != expected_free_regions:
         raise ContractError("promptTemplate coverage differs from free-editable text regions")
+    visual_contract = formal_draft["runtimeSemantics"]["visualContract"]
+    visual_text = _flatten_text(visual_contract)
+    for term in authoring["internalVisualContractTerms"]:
+        if term.casefold() in visual_text.casefold():
+            raise ContractError("visualContract exposes implementation terminology")
+    for fact in analysis["templateValue"]["backendOnlyFacts"]:
+        if fact not in visual_text or fact in prompt:
+            raise ContractError("backend-only facts must appear only in runtime visual semantics")
+    for slot_id, evidence in slot_evidence.items():
+        for fact in evidence["openVisualFacts"]:
+            if fact in visual_text:
+                raise ContractError(f"visualContract locks back an open value from {slot_id}")
+            if fact in title or fact in tags:
+                raise ContractError(f"title or tags lock back an open value from {slot_id}")
+    self_review = analysis["selfReview"]
+    required_checks = set(authoring["selfReviewChecks"])
+    if (
+        not isinstance(self_review, Mapping)
+        or set(self_review) != {
+            "status", "reviewedDraftSha256", "checks", "issuesFound", "revisionsApplied"
+        }
+        or self_review.get("status") != "PASS"
+        or self_review.get("reviewedDraftSha256") != sha256_json(formal_draft)
+        or not isinstance(self_review.get("checks"), Mapping)
+        or set(self_review["checks"]) != required_checks
+        or any(value is not True for value in self_review["checks"].values())
+        or not isinstance(self_review.get("issuesFound"), list)
+        or self_review["issuesFound"]
+        or not isinstance(self_review.get("revisionsApplied"), list)
+    ):
+        raise ContractError("a fresh passing self-review must bind the final formal draft")
 
 
 def validate_formal_json(formal: Mapping[str, Any]) -> None:
@@ -772,11 +929,32 @@ def validate_formal_json(formal: Mapping[str, Any]) -> None:
         not isinstance(tag, str) or not tag or len(tag) > authoring["tagMaxLength"] for tag in tags
     ):
         raise ContractError("production tags violate uniqueness or length limits")
+    if not set(tags).intersection(authoring["majorTagValues"]):
+        raise ContractError("production tags require an official major category")
     prompt = formal.get("promptTemplate")
     if not isinstance(prompt, str) or any(
         term.casefold() in prompt.casefold() for term in authoring["internalPromptTerms"]
     ):
         raise ContractError("production promptTemplate exposes internal terminology")
+    slots = formal.get("inputSchema", {}).get("slots", [])
+    slot_ids = [slot.get("id") for slot in slots if isinstance(slot, Mapping)]
+    placeholders = _PROMPT_SLOT.findall(prompt)
+    if len(placeholders) != len(slots) or sorted(slot_id for slot_id, _ in placeholders) != sorted(slot_ids):
+        raise ContractError("production promptTemplate must contain every slot exactly once")
+    defaults = authoring["slotDefaults"]
+    for slot in slots:
+        if slot.get("required") is not defaults["required"]:
+            raise ContractError("production slots must remain optional")
+        image = slot.get("image")
+        if image is not None and (
+            image.get("maxCount") != defaults["maxCount"]
+            or image.get("minWidth") != defaults["minWidth"]
+            or image.get("minHeight") != defaults["minHeight"]
+            or set(image.get("sourceOptions", [])) != set(defaults["sourceOptions"])
+        ):
+            raise ContractError("production image slot profile is invalid")
+        if image is not None and slot.get("text") is not None and slot.get("resolutionStrategy") != defaults["resolutionStrategy"]:
+            raise ContractError("production composite slots require image_over_text")
     cover, reference = formal.get("cover"), formal.get("referenceImage")
     if cover != reference:
         raise ContractError("cover and referenceImage must be identical")
@@ -827,11 +1005,17 @@ def build_json_review_package(
         "approvedImage": deepcopy(approved_image),
         "frozenCandidateKey": registry_response["resolvedKey"],
         "registry": deepcopy(registry_response),
+        "assetState": {
+            "status": "planned_not_uploaded",
+            "previewUri": approved_image["image"]["uri"],
+            "plannedImmutableUrl": formal_preview["cover"],
+        },
         "analysisSummary": {
             "visualMechanism": analysis["visualMechanism"],
             "counts": deepcopy(analysis["counts"]),
             "warnings": deepcopy(analysis["warnings"]),
         },
+        "templateValue": deepcopy(analysis["templateValue"]),
         "titleEvidence": deepcopy(analysis["titleEvidence"]),
         "tagEvidence": deepcopy(analysis["tagEvidence"]),
         "slotCards": deepcopy(analysis["slotEvidence"]),
@@ -849,6 +1033,7 @@ def build_json_review_package(
             "inputBindings": deepcopy(formal_preview["runtimeSemantics"]["inputBindings"]),
             "visualContract": deepcopy(formal_preview["runtimeSemantics"]["visualContract"]),
         },
+        "selfReview": deepcopy(analysis["selfReview"]),
         "formalPreview": formal_preview,
         "objectSha256": sha256_json(formal_preview),
         "approvedImageSha256": approved_image_sha,
