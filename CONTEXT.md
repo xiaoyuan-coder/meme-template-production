@@ -51,3 +51,23 @@ _Avoid_: Slot type
 **Visual Contract**:
 Backend-only constraints that preserve the Template Mechanism, medium, composition, relations, and rendering behavior across both interaction modes.
 _Avoid_: User-facing Prompt Template
+
+**Discovery Copy**:
+The user-facing title and description that make a Template understandable and appealing before use.
+_Avoid_: Analysis summary, implementation instruction
+
+**Search Tag**:
+A concise user-query term that helps retrieve a Template by its stable mechanism, emotion, scene, use case, subject class, or medium.
+_Avoid_: Visual inventory, open default value, batch-generic filler
+
+**Feature Authority Decision**:
+A per-identity decision that assigns each visible trait to the uploaded identity or the Template Mechanism, with the template retaining only the smallest mechanism-critical exceptions.
+_Avoid_: Copy all source-image traits, freeze the whole template subject
+
+**Free-editable Content**:
+Meaningful picture content kept as natural literal wording in the Prompt Template so it can be changed in Free-edit Mode without becoming a Slot.
+_Avoid_: Hidden constraint, omitted content
+
+**Locked Visual Text**:
+Visible text whose exact content belongs to the Template Mechanism, environment, or layout and remains fixed through backend semantics.
+_Avoid_: Forgotten editable text, watermark

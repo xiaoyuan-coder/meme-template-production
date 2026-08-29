@@ -38,13 +38,17 @@
 
 每个正式槽位在 `slotEvidence` 中保存：四门禁结果、默认值、语义轴、颗粒度、输入模式决议、推荐项替换检查、binding 决议和 `openVisualFacts`。每个文字槽还保存 `defaultLanguageReview`；身份槽保存 `identityRecognition`，明确当前图是否已识别出具体身份及其通行姓名。识别为具体 IP、真人或历史人物时，正式默认值必须等于该姓名；未识别时才使用简洁的可见身份描述。`openVisualFacts` 是该槽开放后不得被 title、tag 或 visualContract 锁回的身份、文字、服装、颜色或内容事实。
 
+`titleEvidence` 同时证明图像根据、使用动机、口语自然、槽位可迁移、用户吸引力和发现价值。`descriptionEvidence` 证明描述面向用户、补充标题、口语自然且不锁定开放值。每个 `tagEvidence` 项除了图像根据和类别，还要写明 `searchIntent`，表示它承接的真实用户查询。
+
 只有一个槽位时才提供 `singleSlotExhaustion`，逐轴记录 subject、text、object、clothing、color、prop、scene 和 nested content 的候选结论；多槽任务不生成这份仪式性证明。
 
 所有正式槽位都具有文字输入；图片能力只在用户自然拥有素材且输入到目标的映射清楚时附加。固定可寻址主体使用 `one_to_one`；同一身份重复实例使用 `same_source_repeated`。只有整组身份保真、自然合照输入、人数可变、成员同类和无独立角色五项全部为真时使用文字+图片的 `preserve_group`。双人合照、固定 CP 和固定角色位按独立身份拆分。密集同类主体先寻找一个承载玩法的焦点身份；由一个类别概念共同驱动的固定位置集合使用普通文字槽，并由后端保留数量与排列。
 
 ## 文字唯一路由
 
-每个文字区只能选 `open_slot/free_editable/preserve/remove/review` 中一项。`open_slot` 必须指向一个真实存在、具备文字输入的 slot ID。人物上方箭头标签、关系称呼、对话、主标题等高价值文字分别开放；两段指向不同人的文字不可合并。水印删除，歧义文字待审，装饰微字保留或清理。
+每个文字区只能选 `open_slot/free_editable/preserve/remove/review` 中一项，并保存 `editValue=high/secondary/fixed/none/ambiguous` 与 `routingEvidence`。`open_slot` 必须指向一个真实存在、具备文字输入的 slot ID。人物上方箭头标签、关系称呼、对话、主标题等高价值文字分别开放；两段指向不同人的文字不可合并。
+
+`free_editable` 的精确默认文字必须出现在 Prompt Template 的自然叙述中；`preserve` 必须在 visualContract 中保留内容和版式；`remove` 不得进入两个表面；`review` 未解决时阻断编译。这使两种编辑模式共享同一份 Prompt Template，同时保持槽位数量只服务高价值快捷编辑。
 
 翻译区使用 `translation_equivalence`，通过源区/目标区 ID 和各自 exactText SHA 建立等价关系；任何文字变化都会使旧证据失效。
 
@@ -58,4 +62,4 @@
 
 自复核面向最终 formal draft，而非初版分析。它记录规范化 JSON SHA、全部固定检查项、发现的问题和已应用修订。校验器重新计算 SHA，并要求检查键全集精确、值全部为 true。草稿任何字段变化都会使旧复核失效。
 
-复核重点包括模板价值、槽位最小化、图片输入理由、群组合理性、文字路由、默认值是否自然且优先使用已识别身份、title 可迁移性、Prompt 前台可读性、占位符、推荐项、正式大类 Tag 和 visualContract 的开放值隔离。该步骤不产生新图片、不调用外部 API，也不代替人工审核。
+复核重点包括模板价值、槽位最小化、图片输入理由、群组合理性、身份特征权限的完整性与最小模板例外，文字槽位/自由编辑/固定层路由，默认值是否自然且优先使用已识别身份、title 和 description 的用户价值、Prompt 前台可读性、占位符、推荐项、Tags 的正式大类与检索意图，以及 visualContract 的开放值隔离。该步骤不产生新图片、不调用外部 API，也不代替人工审核。

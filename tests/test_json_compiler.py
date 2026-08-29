@@ -259,6 +259,32 @@ class GalleryAndOssTests(unittest.TestCase):
                 with self.assertRaises(compiler.ContractError):
                     compiler.validate_authoring_contract(analysis, draft, envelope)
 
+    def test_user_facing_copy_and_retrieval_tags_are_machine_gated(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 1, "status": "approved",
+            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        draft = valid_formal_draft()
+        analysis = valid_approved_analysis(image_sha)
+        compiler.validate_authoring_contract(analysis, draft, envelope)
+
+        weak_title = copy.deepcopy(analysis)
+        weak_title["titleEvidence"]["userAppeal"] = False
+        with self.assertRaises(compiler.ContractError):
+            compiler.validate_authoring_contract(weak_title, draft, envelope)
+
+        internal_description = copy.deepcopy(analysis)
+        internal_description["descriptionEvidence"]["userFacing"] = False
+        with self.assertRaises(compiler.ContractError):
+            compiler.validate_authoring_contract(internal_description, draft, envelope)
+
+        searchless_tag = copy.deepcopy(analysis)
+        searchless_tag["tagEvidence"]["拥抱"]["searchIntent"] = ""
+        with self.assertRaises(compiler.ContractError):
+            compiler.validate_authoring_contract(searchless_tag, draft, envelope)
+
     def test_recognized_ip_identity_uses_specific_natural_default(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
@@ -359,6 +385,7 @@ class GalleryAndOssTests(unittest.TestCase):
         unrouted = valid_approved_analysis(image_sha)
         unrouted["textRegions"] = [{
             "regionId": "left-label", "role": "content", "action": "open_slot",
+            "editValue": "high", "routingEvidence": "关系标签是高价值文字",
             "slotId": "missing_label", "language": "ko", "exactText": "왼쪽",
             "layout": "单行箭头标签", "position": "左侧人物上方",
         }]
@@ -425,6 +452,7 @@ class GalleryAndOssTests(unittest.TestCase):
             })
             analysis["textRegions"].append({
                 "regionId": target_id, "role": "content", "action": "open_slot",
+                "editValue": "high", "routingEvidence": "箭头关系标签是高价值文字",
                 "slotId": slot_id, "language": "zh-CN", "exactText": default,
                 "layout": "单行箭头标签", "position": label,
             })
@@ -563,11 +591,90 @@ class GalleryAndOssTests(unittest.TestCase):
         analysis = valid_approved_analysis(image_sha)
         analysis["textRegions"] = [{
             "regionId": "identity-name", "role": "identity", "action": "preserve",
+            "editValue": "fixed", "routingEvidence": "测试错误保留开放身份名",
             "language": "zh-CN", "exactText": "具体艺人名", "layout": "单行",
             "position": "左上角",
         }]
         with self.assertRaises(compiler.ContractError):
             compiler.validate_authoring_contract(analysis, valid_formal_draft(), envelope)
+
+    def test_feature_authority_and_three_text_edit_layers_are_machine_gated(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 1, "status": "approved",
+            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        draft = valid_formal_draft()
+        draft["promptTemplate"] += " 画面中写着“今日也要开心”。"
+        draft["runtimeSemantics"]["visualContract"]["relations"].append(
+            "背景招牌固定保留“营业中”字样和原排版"
+        )
+        analysis = valid_approved_analysis(image_sha)
+        analysis["textRegions"] = [
+            {
+                "regionId": "secondary-caption", "role": "content",
+                "action": "free_editable", "editValue": "secondary",
+                "routingEvidence": "用户可能修改，但不需要占用快捷槽位",
+                "language": "zh-CN", "exactText": "今日也要开心",
+                "layout": "单行副文案", "position": "画面底部",
+            },
+            {
+                "regionId": "shop-sign", "role": "content",
+                "action": "preserve", "editValue": "fixed",
+                "routingEvidence": "招牌文字是环境语境和版式的固定组成",
+                "language": "zh-CN", "exactText": "营业中",
+                "layout": "招牌弧形字", "position": "背景上方",
+            },
+            {
+                "regionId": "author-mark", "role": "watermark",
+                "action": "remove", "editValue": "none",
+                "routingEvidence": "作者水印不属于模板内容",
+                "language": "zh-CN", "exactText": "@原作者",
+                "layout": "角落小字", "position": "右下角",
+            },
+        ]
+        analysis["promptCoverage"]["freeEditableRegionIds"] = ["secondary-caption"]
+        analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
+        analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(draft["runtimeSemantics"])
+        analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
+        compiler.validate_authoring_contract(analysis, draft, envelope)
+
+        missing_free_text = copy.deepcopy(draft)
+        missing_free_text["promptTemplate"] = valid_formal_draft()["promptTemplate"]
+        missing_analysis = copy.deepcopy(analysis)
+        missing_analysis["semanticModel"]["promptTemplate"] = missing_free_text["promptTemplate"]
+        missing_analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(missing_free_text)
+        with self.assertRaisesRegex(compiler.ContractError, "free-editable text"):
+            compiler.validate_authoring_contract(missing_analysis, missing_free_text, envelope)
+
+        maid_draft = copy.deepcopy(draft)
+        maid_draft["runtimeSemantics"]["inputBindings"]["subject"]["clothingOwnership"] = "template"
+        maid_draft["runtimeSemantics"]["visualContract"]["styleTraits"].append(
+            "角色固定穿着承担反差笑点的女仆装"
+        )
+        maid_dress = copy.deepcopy(analysis)
+        maid_subject = maid_dress["slotEvidence"]["subject"]
+        maid_subject["featureAuthority"]["clothing"] = {
+            "authority": "template", "basis": "core_mechanism",
+            "evidence": "女仆装本身承担模板的反差玩法",
+        }
+        maid_subject["clothingOwnership"] = "template"
+        maid_subject["inheritFromUpload"] = ["可辨认身份特征", "发型"]
+        maid_subject["keepFromTemplate"] = ["女仆装", "拥抱动作"]
+        maid_dress["semanticModel"]["runtimeSemantics"] = copy.deepcopy(
+            maid_draft["runtimeSemantics"]
+        )
+        maid_dress["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(maid_draft)
+        compiler.validate_authoring_contract(maid_dress, maid_draft, envelope)
+
+        mismatched_clothing = copy.deepcopy(maid_dress)
+        mismatched_clothing["slotEvidence"]["subject"]["featureAuthority"]["clothing"] = {
+            "authority": "source", "basis": "appearance_continuity",
+            "evidence": "错误地让女仆装跟随用户图",
+        }
+        with self.assertRaisesRegex(compiler.ContractError, "clothing feature authority"):
+            compiler.validate_authoring_contract(mismatched_clothing, maid_draft, envelope)
 
     def test_gallery_snapshot_and_v2_profile(self):
         draft = valid_formal_draft()
@@ -575,6 +682,10 @@ class GalleryAndOssTests(unittest.TestCase):
         url = f"https://assets.memebuy.cn/gallery/templates/hug-your-pet/{digest}.png"
         formal = {**draft, "cover": url, "referenceImage": url}
         compiler.validate_formal_json(formal)
+        backend_export = copy.deepcopy(formal)
+        backend_export["id"] = "database-generated-template-id"
+        with self.assertRaisesRegex(compiler.ContractError, "forbidden fields.*id"):
+            compiler.validate_formal_json(backend_export)
         old = copy.deepcopy(formal)
         old["runtimeSemantics"]["version"] = 1
         with self.assertRaises(compiler.ContractError):

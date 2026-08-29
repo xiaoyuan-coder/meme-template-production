@@ -340,12 +340,15 @@ class AuditRegressionTests(unittest.TestCase):
                 self.headers = dict(headers)
                 return Result()
 
-            def get_object_meta(self, key):
+            def head_object(self, key):
                 class Meta:
                     pass
                 value = Meta()
                 value.headers = self.headers
                 return value
+
+            def get_object_meta(self, key):
+                raise AssertionError("adapter must use head_object so custom metadata is returned")
 
         class OssModule:
             class Auth:
@@ -379,6 +382,9 @@ class AuditRegressionTests(unittest.TestCase):
         self.assertEqual(response["objectKey"], "gallery/templates/key/a.png")
         self.assertEqual(adapter._bucket.headers["x-oss-forbid-overwrite"], "true")
         self.assertEqual(adapter._bucket.headers["x-oss-meta-sha256"], "a" * 64)
+        self.assertEqual(adapter.head("gallery/templates/key/a.png"), metadata | {
+            "objectKey": "gallery/templates/key/a.png"
+        })
         encoded = json.dumps(response)
         self.assertNotIn("access-id-secret", encoded)
         self.assertNotIn("access-secret", encoded)
@@ -587,12 +593,19 @@ class AuditRegressionTests(unittest.TestCase):
 
         translated = copy.deepcopy(analysis)
         translated["textRegions"] = [
-            {"regionId": "source", "role": "content", "action": "preserve",
+            {"regionId": "source", "role": "content", "action": "free_editable",
+             "editValue": "secondary", "routingEvidence": "可编辑的源语言副文案",
              "language": "en", "exactText": "HUG ME", "layout": "one line", "position": "top"},
-            {"regionId": "translated", "role": "content", "action": "preserve",
+            {"regionId": "translated", "role": "content", "action": "free_editable",
+             "editValue": "secondary", "routingEvidence": "可编辑的译文副文案",
              "language": "zh-CN", "exactText": "抱抱我", "layout": "单行", "position": "下方",
              "translationSourceRegionId": "source"},
         ]
+        translated_draft = copy.deepcopy(draft)
+        translated_draft["promptTemplate"] += " 画面中还写着 HUG ME 和抱抱我。"
+        translated["promptCoverage"]["freeEditableRegionIds"] = ["source", "translated"]
+        translated["semanticModel"]["promptTemplate"] = translated_draft["promptTemplate"]
+        translated["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(translated_draft)
         translated["translationEquivalences"] = [{
             "sourceRegionId": "source",
             "targetRegionIds": ["translated"],
@@ -601,10 +614,10 @@ class AuditRegressionTests(unittest.TestCase):
                 "translated": hashlib.sha256("抱抱我".encode()).hexdigest()
             },
         }]
-        compiler.validate_authoring_contract(translated, draft, envelope)
+        compiler.validate_authoring_contract(translated, translated_draft, envelope)
         translated["textRegions"][1]["exactText"] = "旧摘要"
         with self.assertRaises(compiler.ContractError):
-            compiler.validate_authoring_contract(translated, draft, envelope)
+            compiler.validate_authoring_contract(translated, translated_draft, envelope)
 
     def test_index_merges_same_revision_and_appends_new_revision_atomically(self):
         base = {

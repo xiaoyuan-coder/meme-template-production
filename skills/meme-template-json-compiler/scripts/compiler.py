@@ -103,7 +103,10 @@ class AliyunOssAdapter:
 
     def head(self, object_key: str) -> Mapping[str, Any] | None:
         try:
-            result = self._bucket.get_object_meta(object_key)
+            # `get_object_meta` may omit user-defined x-oss-meta-* headers on
+            # otherwise healthy objects. `head_object` returns the complete
+            # response headers required for create-once reconciliation.
+            result = self._bucket.head_object(object_key)
         except Exception as exc:
             status = getattr(exc, "status", None)
             if status == 404:
@@ -388,7 +391,7 @@ def validate_approved_image_analysis(
         "templateValue",
         "identityTopology", "textRegions", "mediumComposition", "spatialRelations",
         "containers", "fixedStructure", "editableCandidates", "counts", "fieldEvidence",
-        "titleEvidence", "tagEvidence", "slotEvidence", "promptCoverage",
+        "titleEvidence", "descriptionEvidence", "tagEvidence", "slotEvidence", "promptCoverage",
         "translationEquivalences", "semanticModel", "selfReview",
         "warnings",
     }
@@ -452,8 +455,16 @@ def validate_approved_image_analysis(
     title_evidence = analysis["titleEvidence"]
     gates = _contract()["authoring"]["titleGates"]
     if not isinstance(title_evidence, Mapping) or any(title_evidence.get(gate) is not True for gate in gates):
-        raise ContractError("title must pass all four portability gates")
+        raise ContractError("title must pass every user-facing discovery gate")
     _non_empty_text(title_evidence.get("evidence"), "titleEvidence.evidence")
+    description_evidence = analysis["descriptionEvidence"]
+    description_gates = _contract()["authoring"]["descriptionGates"]
+    if (
+        not isinstance(description_evidence, Mapping)
+        or any(description_evidence.get(gate) is not True for gate in description_gates)
+    ):
+        raise ContractError("description must pass every user-facing copy gate")
+    _non_empty_text(description_evidence.get("evidence"), "descriptionEvidence.evidence")
     _validate_text_regions(analysis["textRegions"])
     _validate_translation_equivalences(analysis["textRegions"], analysis["translationEquivalences"])
     _validate_semantic_model(analysis)
@@ -582,6 +593,9 @@ def _validate_text_regions(regions: Sequence[Mapping[str, Any]]) -> None:
         action = region.get("action")
         if action not in authoring["allowedTextActions"]:
             raise ContractError("text region action is invalid")
+        if region.get("editValue") != authoring["textEditValueByAction"][action]:
+            raise ContractError("text region edit value differs from its route")
+        _non_empty_text(region.get("routingEvidence"), "text region routing evidence")
         if region["role"] == "watermark" and action != "remove":
             raise ContractError("watermark text can only be removed")
         if region["role"] == "ambiguous" and action != "review":
@@ -620,6 +634,7 @@ def validate_authoring_contract(
         if not isinstance(evidence, Mapping):
             raise ContractError(f"tag evidence for {tag} must be an object")
         _non_empty_text(evidence.get("visualEvidence"), f"tag evidence for {tag}")
+        _non_empty_text(evidence.get("searchIntent"), f"tag search intent for {tag}")
         category = evidence.get("category")
         if category not in authoring["tagCategories"]:
             raise ContractError("tag category is invalid")
@@ -841,6 +856,27 @@ def validate_authoring_contract(
                     raise ContractError("identity images must not import their background or unrelated content")
                 if evidence.get("clothingOwnership") != binding.get("clothingOwnership"):
                     raise ContractError("slot clothing ownership differs from its runtime binding")
+                feature_authority = evidence.get("featureAuthority")
+                required_axes = set(authoring["featureAuthorityAxes"])
+                if not isinstance(feature_authority, Mapping) or set(feature_authority) != required_axes:
+                    raise ContractError("identity slots require a complete per-feature authority decision")
+                for axis, decision in feature_authority.items():
+                    if not isinstance(decision, Mapping) or set(decision) != {
+                        "authority", "basis", "evidence"
+                    }:
+                        raise ContractError(f"feature authority for {axis} is incomplete")
+                    authority = decision.get("authority")
+                    basis = decision.get("basis")
+                    if (
+                        authority not in authoring["featureAuthorityValues"]
+                        or basis not in authoring["featureAuthorityBases"][authority]
+                    ):
+                        raise ContractError(f"feature authority for {axis} has an invalid basis")
+                    _non_empty_text(decision.get("evidence"), f"feature authority evidence for {axis}")
+                if feature_authority["identity"]["authority"] != "source":
+                    raise ContractError("an identity upload must remain the identity authority")
+                if feature_authority["clothing"]["authority"] != binding.get("clothingOwnership"):
+                    raise ContractError("clothing feature authority differs from the formal binding")
                 if binding_kind == "preserve_group":
                     if (
                         mode_decision.get("modes") != ["text", "image"]
@@ -916,6 +952,17 @@ def validate_authoring_contract(
         raise ContractError("promptTemplate coverage differs from free-editable text regions")
     visual_contract = formal_draft["runtimeSemantics"]["visualContract"]
     visual_text = _flatten_text(visual_contract)
+    for region in analysis["textRegions"]:
+        exact_text = region["exactText"]
+        action = region["action"]
+        if action == "free_editable" and exact_text not in prompt:
+            raise ContractError("free-editable text must remain literal user-facing Prompt content")
+        if action == "preserve" and exact_text not in visual_text:
+            raise ContractError("fixed visual text must be preserved by backend visual semantics")
+        if action == "remove" and (exact_text in prompt or exact_text in visual_text):
+            raise ContractError("removed text cannot survive in user or backend prompt surfaces")
+        if action == "review":
+            raise ContractError("unresolved text review blocks JSON authoring")
     for term in authoring["internalVisualContractTerms"]:
         if term.casefold() in visual_text.casefold():
             raise ContractError("visualContract exposes implementation terminology")
@@ -1057,6 +1104,7 @@ def build_json_review_package(
         },
         "templateValue": deepcopy(analysis["templateValue"]),
         "titleEvidence": deepcopy(analysis["titleEvidence"]),
+        "descriptionEvidence": deepcopy(analysis["descriptionEvidence"]),
         "tagEvidence": deepcopy(analysis["tagEvidence"]),
         "slotCards": deepcopy(analysis["slotEvidence"]),
         "copy": {

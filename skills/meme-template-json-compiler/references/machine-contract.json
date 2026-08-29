@@ -55,7 +55,11 @@
       "visualContract", "inputBindings", "clothingOwnership", "cover", "referenceImage"
     ],
     "titleGates": [
-      "templateGrounded", "usageMotivation", "spokenNaturalness", "slotPortability"
+      "templateGrounded", "usageMotivation", "spokenNaturalness", "slotPortability",
+      "userAppeal", "discoveryValue"
+    ],
+    "descriptionGates": [
+      "userFacing", "complementsTitle", "spokenNaturalness", "slotPortability"
     ],
     "internalPromptTerms": [
       "runtimeSemantics", "visualContract", "inputBindings", "targetInstances",
@@ -64,6 +68,13 @@
     ],
     "internalVisualContractTerms": ["主体槽", "图片槽", "文字槽", "独立槽位"],
     "allowedTextActions": ["open_slot", "free_editable", "preserve", "remove", "review"],
+    "textEditValueByAction": {
+      "open_slot": "high",
+      "free_editable": "secondary",
+      "preserve": "fixed",
+      "remove": "none",
+      "review": "ambiguous"
+    },
     "textRoles": ["identity", "content", "attribution", "watermark", "brand", "ambiguous"],
     "tagCategories": ["mechanism", "subject", "scene", "medium", "emotion", "use_case", "text", "relation"],
     "singleSlotAxes": [
@@ -74,6 +85,14 @@
     ],
     "identityRecognitionStatuses": ["recognized", "unrecognized"],
     "recognizedIdentityGenericSuffixes": ["角色", "人物", "主体"],
+    "featureAuthorityAxes": [
+      "identity", "body", "ageStage", "hair", "clothing", "accessories", "expression", "pose", "action"
+    ],
+    "featureAuthorityValues": ["source", "template"],
+    "featureAuthorityBases": {
+      "source": ["identity_fidelity", "appearance_continuity"],
+      "template": ["core_mechanism", "composition_dependency", "explicit_transformation"]
+    },
     "slotDefaults": {
       "required": false,
       "textRequired": true,
@@ -85,7 +104,9 @@
     },
     "selfReviewChecks": [
       "templateValueFocused", "slotScopeMinimal", "imageModesJustified",
-      "groupPolicyJustified", "textRoutingComplete", "titlePortable",
+      "groupPolicyJustified", "featureAuthorityComplete", "textRoutingComplete",
+      "textEditLayersComplete", "titlePortable",
+      "copyUserFacingAndSearchable",
       "promptUserFacing", "placeholdersExact", "suggestionsSubstituteNaturally",
       "defaultsNaturalAndIdentitySpecific", "tagsValid", "visualContractRespectsInputs"
     ],

@@ -18,4 +18,4 @@
 
 稳定索引按 `(skill, itemId, revision)` 合并：同一三元组由新状态原子替换，新 revision 追加保留；`generatedAt` 随成功写入更新。写入使用进程锁、同目录临时文件、fsync 和 rename，并拒绝损坏旧索引、符号链接与越界路径。每次调用仍受 1–100 条批量边界约束。
 
-正式 `<key>.json` 不包含 sidecar、receipt、审核、路径、API 响应或运行状态。删除 sidecar 不改变已交付 JSON 的运行语义。
+正式 `<key>.json` 不包含顶层 `id`、sidecar、receipt、审核、路径、API 响应或运行状态。顶层模板 `id` 只由后端入库生成；已上线数据从管理台导出时可能带有该字段，不能据此写回生产交付。`inputSchema.slots[].id` 与 `runtimeSemantics.targetInstances[].id` 是模板内部绑定标识，继续保留。删除 sidecar 不改变已交付 JSON 的运行语义。
