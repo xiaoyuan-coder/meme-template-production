@@ -76,6 +76,7 @@
     "recognizedIdentityGenericSuffixes": ["角色", "人物", "主体"],
     "slotDefaults": {
       "required": false,
+      "textRequired": true,
       "resolutionStrategy": "image_over_text",
       "minWidth": 256,
       "minHeight": 256,

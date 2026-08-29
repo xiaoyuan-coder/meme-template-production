@@ -10,7 +10,7 @@ Consume only an Approved Template Image envelope for visual semantics. The perso
 ## Workflow
 
 1. Confirm `jsonschema>=4.26,<5` is available before running `scripts/compiler.py`; the install-local declaration is `requirements.txt`. Report the missing dependency without installing it automatically. Validate the minimal Approved Template Image envelope with the bundled contract.
-2. Independently analyze the approved image. Read [approved-image-analysis.md](references/approved-image-analysis.md). Begin with `templateValue`: why the image was selected, what the reusable hook is, which mechanism stays fixed, and which facts belong only in backend semantics. Do not read source-image analysis, replacement strategy, generation prompts, provider data, or batch reasoning.
+2. Read [product-model.md](references/product-model.md), then independently analyze the approved image with [approved-image-analysis.md](references/approved-image-analysis.md). Begin with `templateValue`: why the image was selected, what the reusable hook is, which mechanism stays fixed, and which facts belong only in backend semantics. Do not read source-image analysis, replacement strategy, generation prompts, provider data, or batch reasoning.
 3. Read [authoring-fields.md](references/authoring-fields.md) and [gallery-v2.md](references/gallery-v2.md). Compile the smallest useful slot set, input modes, copy, tags, Prompt Template, bindings, and visual contract from the approved image. Ordinary supporting details stay fixed; dynamic groups require all five group-photo conditions.
 4. Resolve the proposed key through `KeyRegistryReader.resolveTemplateKey(request)`. Read [key-registry.md](references/key-registry.md). Pause only the affected item on collision, source conflict, or registry unavailability.
 5. Validate the draft against the immutable vendored Gallery snapshot and the stricter Memebuy production profile. Then perform the lightweight same-run self-review defined in the analysis reference; bind it to the final draft SHA and revise until every fixed check passes.
@@ -21,7 +21,7 @@ Consume only an Approved Template Image envelope for visual semantics. The perso
 ## Hard boundaries
 
 - Input and runtime semantics are version 2; identity bindings explicitly declare `clothingOwnership`.
-- Every slot is optional. Image inputs use the frozen 256×256 minimum and full source option set. A text+image slot resolves with `image_over_text`.
+- Every slot is optional and text-capable. Image input is an additive capability using the frozen 256×256 minimum and full source option set; text+image resolves with `image_over_text`.
 - Prompt Template contains every slot exactly once and stays user-facing. Backend generation constraints remain in runtime semantics; open defaults and recommendations never reappear as fixed visual-contract facts.
 - Metadata includes 5–8 tags and at least one exact official major category.
 - Key identity comes only from the registry protocol; filename, directory, batch number, title, visual similarity, and approved-image SHA cannot prove source identity.

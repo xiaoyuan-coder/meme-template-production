@@ -467,9 +467,10 @@ class GalleryAndOssTests(unittest.TestCase):
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         draft = valid_formal_draft()
-        del draft["inputSchema"]["slots"][0]["text"]
-        del draft["inputSchema"]["slots"][0]["resolutionStrategy"]
-        draft["promptTemplate"] = "{{ subject | \"家庭合照\" }}围拢在画面中央并保持紧密互动。"
+        slot = draft["inputSchema"]["slots"][0]
+        slot["text"]["defaultValue"] = "家庭成员"
+        slot["text"]["suggestions"] = ["亲友团", "同事团队", "同学聚会"]
+        draft["promptTemplate"] = "{{ subject | \"家庭成员\" }}围拢在画面中央并保持紧密互动。"
         draft["runtimeSemantics"]["targetInstances"] = [{
             "id": "subject_group", "kind": "identity_group", "role": "中央合照群组",
             "region": "画面中央", "memberKind": "person", "minMembers": 2, "maxMembers": 8,
@@ -508,14 +509,19 @@ class GalleryAndOssTests(unittest.TestCase):
         }
         analysis["semanticModel"]["completeRedrawByTarget"] = {"subject_group": True}
         analysis["slotEvidence"]["subject"]["bindingKind"] = "preserve_group"
-        analysis["slotEvidence"]["subject"]["defaultValue"] = "家庭合照"
+        analysis["slotEvidence"]["subject"]["defaultValue"] = "家庭成员"
         analysis["slotEvidence"]["subject"]["inputModeDecision"] = {
-            "modes": ["image"], "reason": "dynamic_group",
+            "modes": ["text", "image"], "reason": "dynamic_group",
             "evidence": "用户自然拥有成员同框且人数可变的家庭合照",
         }
-        analysis["slotEvidence"]["subject"]["suggestionChecks"] = []
-        analysis["slotEvidence"]["subject"]["openVisualFacts"] = ["家庭合照"]
-        analysis["slotEvidence"]["subject"].pop("defaultLanguageReview")
+        analysis["slotEvidence"]["subject"]["suggestionChecks"] = [
+            {"value": value, "sameAxis": True, "sameGranularity": True,
+             "mechanismCompatible": True}
+            for value in ("亲友团", "同事团队", "同学聚会")
+        ]
+        analysis["slotEvidence"]["subject"]["openVisualFacts"] = [
+            "家庭成员", "亲友团", "同事团队", "同学聚会",
+        ]
         analysis["slotEvidence"]["subject"].pop("identityRecognition")
         analysis["slotEvidence"]["subject"]["groupDecision"] = {
             "wholeGroupIdentityFidelity": True,
@@ -526,10 +532,26 @@ class GalleryAndOssTests(unittest.TestCase):
         }
         analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
         compiler.validate_authoring_contract(analysis, draft, envelope)
-        invalid = copy.deepcopy(analysis)
-        invalid["slotEvidence"]["subject"]["groupDecision"]["variableMemberCount"] = False
-        with self.assertRaises(compiler.ContractError):
-            compiler.validate_authoring_contract(invalid, draft, envelope)
+        for failed_fact in (
+            "wholeGroupIdentityFidelity", "groupPhotoNaturalInput", "variableMemberCount",
+            "sameMemberKind", "noIndividuallyAddressableRoles",
+        ):
+            with self.subTest(failed_fact=failed_fact):
+                invalid = copy.deepcopy(analysis)
+                invalid["slotEvidence"]["subject"]["groupDecision"][failed_fact] = False
+                with self.assertRaises(compiler.ContractError):
+                    compiler.validate_authoring_contract(invalid, draft, envelope)
+
+        pure_image_draft = copy.deepcopy(draft)
+        del pure_image_draft["inputSchema"]["slots"][0]["text"]
+        del pure_image_draft["inputSchema"]["slots"][0]["resolutionStrategy"]
+        pure_image_analysis = copy.deepcopy(analysis)
+        pure_image_analysis["slotEvidence"]["subject"]["inputModeDecision"]["modes"] = ["image"]
+        pure_image_analysis["slotEvidence"]["subject"]["suggestionChecks"] = []
+        pure_image_analysis["semanticModel"]["promptTemplate"] = pure_image_draft["promptTemplate"]
+        pure_image_analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(pure_image_draft)
+        with self.assertRaisesRegex(compiler.ContractError, "every production slot requires text input"):
+            compiler.validate_authoring_contract(pure_image_analysis, pure_image_draft, envelope)
 
     def test_open_subject_rejects_preserved_specific_identity_text(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()

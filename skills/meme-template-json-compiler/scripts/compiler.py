@@ -733,6 +733,14 @@ def validate_authoring_contract(
         if slot.get("required") is not authoring["slotDefaults"]["required"]:
             raise ContractError("all production slots must remain optional")
         text_mode = slot.get("text")
+        if authoring["slotDefaults"]["textRequired"] is True and not isinstance(text_mode, Mapping):
+            raise ContractError("every production slot requires text input")
+        if (
+            text_mode.get("allowCustom") is not True
+            or text_mode.get("presentation") != "suggestions"
+        ):
+            raise ContractError("every production slot requires custom text and recommendations")
+        _non_empty_text(text_mode.get("placeholder"), f"slot {slot['id']} text placeholder")
         suggestions = text_mode.get("suggestions", []) if isinstance(text_mode, Mapping) else []
         suggestion_checks = evidence.get("suggestionChecks")
         if text_mode is not None:
@@ -760,8 +768,6 @@ def validate_authoring_contract(
                 raise ContractError("recommendations must pass axis, granularity, and mechanism checks")
             if not {evidence["defaultValue"], *suggestions}.issubset(set(open_facts)):
                 raise ContractError("openVisualFacts must include the default and all recommendations")
-        elif suggestion_checks not in ([], None):
-            raise ContractError("pure-image slots cannot carry text recommendation checks")
         image_mode = slot.get("image")
         actual_modes = [name for name, value in (("text", text_mode), ("image", image_mode)) if value is not None]
         mode_decision = evidence.get("inputModeDecision")
@@ -785,7 +791,7 @@ def validate_authoring_contract(
         if evidence.get("bindingKind") != binding_kind:
             raise ContractError("slot evidence binding kind differs from runtime semantics")
         identity_recognition = evidence.get("identityRecognition")
-        if binding.get("operation") == "replace_identity" and text_mode is not None:
+        if binding.get("operation") == "replace_identity" and binding_kind != "preserve_group":
             if (
                 not isinstance(identity_recognition, Mapping)
                 or set(identity_recognition) != {"status", "canonicalName", "evidence"}
@@ -836,8 +842,11 @@ def validate_authoring_contract(
                 if evidence.get("clothingOwnership") != binding.get("clothingOwnership"):
                     raise ContractError("slot clothing ownership differs from its runtime binding")
                 if binding_kind == "preserve_group":
-                    if text_mode is not None or mode_decision.get("reason") != "dynamic_group":
-                        raise ContractError("dynamic groups must use an image-only group-photo input")
+                    if (
+                        mode_decision.get("modes") != ["text", "image"]
+                        or mode_decision.get("reason") != "dynamic_group"
+                    ):
+                        raise ContractError("dynamic groups require text plus group-photo input")
                     if binding.get("allowedSourceGrouping") != ["group_photo"]:
                         raise ContractError("dynamic groups only accept a natural group photo")
                     group = evidence.get("groupDecision")
@@ -847,7 +856,7 @@ def validate_authoring_contract(
                     }
                     if not isinstance(group, Mapping) or any(group.get(name) is not True for name in required_group_facts):
                         raise ContractError("preserve_group requires all five dynamic-group decisions")
-                elif text_mode is None or mode_decision.get("reason") != "identity_subject":
+                elif mode_decision.get("reason") != "identity_subject":
                     raise ContractError("addressable identity subjects require text and image modes")
             elif evidence.get("selectionReason") != "exact_content_asset" or mode_decision.get("reason") != "exact_content_asset":
                 raise ContractError("non-identity image inputs require exact-content-asset evidence")
