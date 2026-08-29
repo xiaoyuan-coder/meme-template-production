@@ -740,6 +740,14 @@ def validate_authoring_contract(
                 raise ContractError("text-mode slots require exactly three unique suggestions")
             if text_mode.get("defaultValue") != evidence["defaultValue"]:
                 raise ContractError("slot default differs from independent slot evidence")
+            language_review = evidence.get("defaultLanguageReview")
+            required_language_checks = {"natural", "concise", "modifierMinimal"}
+            if (
+                not isinstance(language_review, Mapping)
+                or set(language_review) != required_language_checks
+                or any(language_review.get(name) is not True for name in required_language_checks)
+            ):
+                raise ContractError("text defaults require a passing natural-language review")
             if not isinstance(suggestion_checks, list) or [item.get("value") for item in suggestion_checks] != suggestions:
                 raise ContractError("suggestion checks must correspond to the authored recommendations")
             if any(
@@ -776,6 +784,29 @@ def validate_authoring_contract(
         )
         if evidence.get("bindingKind") != binding_kind:
             raise ContractError("slot evidence binding kind differs from runtime semantics")
+        identity_recognition = evidence.get("identityRecognition")
+        if binding.get("operation") == "replace_identity" and text_mode is not None:
+            if (
+                not isinstance(identity_recognition, Mapping)
+                or set(identity_recognition) != {"status", "canonicalName", "evidence"}
+                or identity_recognition.get("status") not in authoring["identityRecognitionStatuses"]
+            ):
+                raise ContractError("text-capable identity slots require an identity-recognition decision")
+            _non_empty_text(identity_recognition.get("evidence"), "identity-recognition evidence")
+            canonical_name = identity_recognition.get("canonicalName")
+            if identity_recognition["status"] == "recognized":
+                canonical_name = _non_empty_text(canonical_name, "recognized identity name")
+                if canonical_name != evidence["defaultValue"]:
+                    raise ContractError("recognized identity name must be the authored default")
+                if any(
+                    canonical_name.endswith(suffix)
+                    for suffix in authoring["recognizedIdentityGenericSuffixes"]
+                ):
+                    raise ContractError("recognized identities require a specific conventional name")
+            elif canonical_name is not None:
+                raise ContractError("unrecognized identities cannot claim a canonical name")
+        elif identity_recognition is not None:
+            raise ContractError("identityRecognition belongs only to text-capable identity slots")
         if image_mode is not None:
             defaults = authoring["slotDefaults"]
             if (

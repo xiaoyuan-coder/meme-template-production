@@ -72,6 +72,8 @@
     "allowedSlotSelectionReasons": [
       "identity_control", "template_hook", "high_value_text", "exact_content_asset"
     ],
+    "identityRecognitionStatuses": ["recognized", "unrecognized"],
+    "recognizedIdentityGenericSuffixes": ["角色", "人物", "主体"],
     "slotDefaults": {
       "required": false,
       "resolutionStrategy": "image_over_text",
@@ -84,7 +86,7 @@
       "templateValueFocused", "slotScopeMinimal", "imageModesJustified",
       "groupPolicyJustified", "textRoutingComplete", "titlePortable",
       "promptUserFacing", "placeholdersExact", "suggestionsSubstituteNaturally",
-      "tagsValid", "visualContractRespectsInputs"
+      "defaultsNaturalAndIdentitySpecific", "tagsValid", "visualContractRespectsInputs"
     ],
     "semanticCompiler": "compile_semantics_from_analysis"
   },

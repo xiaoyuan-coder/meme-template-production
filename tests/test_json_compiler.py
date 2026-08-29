@@ -259,6 +259,54 @@ class GalleryAndOssTests(unittest.TestCase):
                 with self.assertRaises(compiler.ContractError):
                     compiler.validate_authoring_contract(analysis, draft, envelope)
 
+    def test_recognized_ip_identity_uses_specific_natural_default(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 1, "status": "approved",
+            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        draft = valid_formal_draft()
+        slot = draft["inputSchema"]["slots"][0]
+        slot["text"]["defaultValue"] = "葛城美里"
+        slot["text"]["suggestions"] = ["式波·明日香", "绫波丽", "五条悟"]
+        draft["promptTemplate"] = "双臂紧紧抱住画面中央的{{ subject | \"葛城美里\" }}。"
+
+        analysis = valid_approved_analysis(image_sha)
+        evidence = analysis["slotEvidence"]["subject"]
+        evidence["defaultValue"] = "葛城美里"
+        evidence["identityRecognition"] = {
+            "status": "recognized",
+            "canonicalName": "葛城美里",
+            "evidence": "角色身份可由 Approved Image 的稳定辨识特征确认",
+        }
+        evidence["suggestionChecks"] = [
+            {"value": value, "sameAxis": True, "sameGranularity": True,
+             "mechanismCompatible": True}
+            for value in ("式波·明日香", "绫波丽", "五条悟")
+        ]
+        evidence["openVisualFacts"] = ["葛城美里", "式波·明日香", "绫波丽", "五条悟"]
+        analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
+        analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
+        compiler.validate_authoring_contract(analysis, draft, envelope)
+
+        generic_draft = copy.deepcopy(draft)
+        generic_draft["inputSchema"]["slots"][0]["text"]["defaultValue"] = "紫发红夹克角色"
+        generic_draft["promptTemplate"] = "双臂紧紧抱住画面中央的{{ subject | \"紫发红夹克角色\" }}。"
+        generic = copy.deepcopy(analysis)
+        generic["slotEvidence"]["subject"]["defaultValue"] = "紫发红夹克角色"
+        generic["slotEvidence"]["subject"]["identityRecognition"]["canonicalName"] = "紫发红夹克角色"
+        generic["slotEvidence"]["subject"]["openVisualFacts"][0] = "紫发红夹克角色"
+        generic["semanticModel"]["promptTemplate"] = generic_draft["promptTemplate"]
+        generic["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(generic_draft)
+        with self.assertRaises(compiler.ContractError):
+            compiler.validate_authoring_contract(generic, generic_draft, envelope)
+
+        overdescribed = copy.deepcopy(analysis)
+        overdescribed["slotEvidence"]["subject"]["defaultLanguageReview"]["modifierMinimal"] = False
+        with self.assertRaises(compiler.ContractError):
+            compiler.validate_authoring_contract(overdescribed, draft, envelope)
+
     def test_official_major_tag_and_frozen_image_profile_are_required(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
@@ -385,6 +433,9 @@ class GalleryAndOssTests(unittest.TestCase):
                 "modelControllable": True, "mechanismPreserved": True,
                 "selectionReason": "high_value_text", "defaultValue": default,
                 "semanticAxis": f"{label}内容", "granularity": "人物关系短标签",
+                "defaultLanguageReview": {
+                    "natural": True, "concise": True, "modifierMinimal": True,
+                },
                 "inputModeDecision": {
                     "modes": ["text"], "reason": "text_only",
                     "evidence": "文字内容可直接编辑，无需视觉素材",
@@ -464,6 +515,8 @@ class GalleryAndOssTests(unittest.TestCase):
         }
         analysis["slotEvidence"]["subject"]["suggestionChecks"] = []
         analysis["slotEvidence"]["subject"]["openVisualFacts"] = ["家庭合照"]
+        analysis["slotEvidence"]["subject"].pop("defaultLanguageReview")
+        analysis["slotEvidence"]["subject"].pop("identityRecognition")
         analysis["slotEvidence"]["subject"]["groupDecision"] = {
             "wholeGroupIdentityFidelity": True,
             "groupPhotoNaturalInput": True,

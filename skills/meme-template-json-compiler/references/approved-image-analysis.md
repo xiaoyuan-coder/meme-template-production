@@ -36,7 +36,7 @@
 
 每个 `editableCandidate` 都记录 `selected`、`selectionReason` 和 `exclusionReason`。选中理由只能是 `identity_control/template_hook/high_value_text/exact_content_asset`。普通餐食、背景小物和陪衬装饰不能仅因“肉眼可见”就成为槽位。
 
-每个正式槽位在 `slotEvidence` 中保存：四门禁结果、默认值、语义轴、颗粒度、输入模式决议、推荐项替换检查、binding 决议和 `openVisualFacts`。`openVisualFacts` 是该槽开放后不得被 title、tag 或 visualContract 锁回的身份、文字、服装、颜色或内容事实。
+每个正式槽位在 `slotEvidence` 中保存：四门禁结果、默认值、语义轴、颗粒度、输入模式决议、推荐项替换检查、binding 决议和 `openVisualFacts`。每个文字槽还保存 `defaultLanguageReview`；身份槽保存 `identityRecognition`，明确当前图是否已识别出具体身份及其通行姓名。识别为具体 IP、真人或历史人物时，正式默认值必须等于该姓名；未识别时才使用简洁的可见身份描述。`openVisualFacts` 是该槽开放后不得被 title、tag 或 visualContract 锁回的身份、文字、服装、颜色或内容事实。
 
 只有一个槽位时才提供 `singleSlotExhaustion`，逐轴记录 subject、text、object、clothing、color、prop、scene 和 nested content 的候选结论；多槽任务不生成这份仪式性证明。
 
@@ -58,4 +58,4 @@
 
 自复核面向最终 formal draft，而非初版分析。它记录规范化 JSON SHA、全部固定检查项、发现的问题和已应用修订。校验器重新计算 SHA，并要求检查键全集精确、值全部为 true。草稿任何字段变化都会使旧复核失效。
 
-复核重点包括模板价值、槽位最小化、图片输入理由、群组合理性、文字路由、title 可迁移性、Prompt 前台可读性、占位符、推荐项、正式大类 Tag 和 visualContract 的开放值隔离。该步骤不产生新图片、不调用外部 API，也不代替人工审核。
+复核重点包括模板价值、槽位最小化、图片输入理由、群组合理性、文字路由、默认值是否自然且优先使用已识别身份、title 可迁移性、Prompt 前台可读性、占位符、推荐项、正式大类 Tag 和 visualContract 的开放值隔离。该步骤不产生新图片、不调用外部 API，也不代替人工审核。

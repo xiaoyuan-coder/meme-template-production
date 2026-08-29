@@ -276,6 +276,16 @@ def valid_approved_analysis(image_sha: str) -> dict:
                 "defaultValue": "橘白猫",
                 "semanticAxis": "中央被拥抱主体的身份",
                 "granularity": "单一主体类型",
+                "defaultLanguageReview": {
+                    "natural": True,
+                    "concise": True,
+                    "modifierMinimal": True,
+                },
+                "identityRecognition": {
+                    "status": "unrecognized",
+                    "canonicalName": None,
+                    "evidence": "当前图只支持识别为橘白猫，不支持具体命名身份",
+                },
                 "inputModeDecision": {
                     "modes": ["text", "image"],
                     "reason": "identity_subject",
@@ -338,7 +348,7 @@ def valid_approved_analysis(image_sha: str) -> dict:
                     "groupPolicyJustified", "textRoutingComplete", "titlePortable",
                     "promptUserFacing", "placeholdersExact",
                     "suggestionsSubstituteNaturally", "tagsValid",
-                    "visualContractRespectsInputs",
+                    "defaultsNaturalAndIdentitySpecific", "visualContractRespectsInputs",
                 )
             },
             "issuesFound": [],
