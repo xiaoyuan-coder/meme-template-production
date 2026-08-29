@@ -13,6 +13,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -67,9 +68,18 @@ class FalEditAdapter(Protocol):
 class FalHttpEditAdapter:
     """One-shot FAL queue adapter; the injected HTTP client must not retry POSTs."""
 
-    def __init__(self, client: Any, uploader: Callable[[bytes, str, str], str] | None = None) -> None:
+    _INPUT_HOSTING_RETRY_DELAYS = (5.0, 10.0)
+
+    def __init__(
+        self,
+        client: Any,
+        uploader: Callable[[bytes, str, str], str] | None = None,
+        *,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._client = client
         self._uploader = uploader
+        self._sleeper = sleeper
 
     def submit_edit(self, model: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         _validate_compiled_fal_payload(model, payload)
@@ -128,13 +138,14 @@ class FalHttpEditAdapter:
         try:
             content = base64.b64decode(match.group(2), validate=True)
             hosted = None
-            for attempt in range(2):
+            for attempt in range(len(self._INPUT_HOSTING_RETRY_DELAYS) + 1):
                 try:
                     hosted = self._uploader(content, mime, f"approved-input.{mime.split('/')[1]}")
                     break
                 except Exception:
-                    if attempt == 1:
+                    if attempt == len(self._INPUT_HOSTING_RETRY_DELAYS):
                         raise
+                    self._sleeper(self._INPUT_HOSTING_RETRY_DELAYS[attempt])
         except Exception:
             raise InputHostingError("FAL input hosting failed before generation submission") from None
         if not isinstance(hosted, str) or not hosted.startswith("https://"):

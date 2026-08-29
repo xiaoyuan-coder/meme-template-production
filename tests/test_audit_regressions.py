@@ -236,7 +236,7 @@ class AuditRegressionTests(unittest.TestCase):
                 self.assertNotIn("provider-secret", str(failure.exception))
                 self.assertNotIn("signed.invalid", str(failure.exception))
 
-    def test_input_hosting_retries_once_without_retrying_generation_post(self):
+    def test_input_hosting_uses_bounded_backoff_without_retrying_generation_post(self):
         class Response:
             status_code = 202
 
@@ -260,8 +260,9 @@ class AuditRegressionTests(unittest.TestCase):
                 raise OSError("temporary storage connection failure")
             return "https://v3.fal.media/files/recovered-input.png"
 
+        sleep_calls = []
         client = Client()
-        adapter = producer.FalHttpEditAdapter(client, transient_uploader)
+        adapter = producer.FalHttpEditAdapter(client, transient_uploader, sleeper=sleep_calls.append)
         response = adapter.submit_edit("openai/gpt-image-2/edit", {
             "image_urls": ["data:image/png;base64,iVBORw0KGgo="],
             "prompt": "safe replacement",
@@ -272,6 +273,7 @@ class AuditRegressionTests(unittest.TestCase):
         })
         self.assertEqual(response["request_id"], "provider-request-after-hosting-retry")
         self.assertEqual(len(upload_calls), 2)
+        self.assertEqual(sleep_calls, [5.0])
         self.assertEqual(len(client.calls), 1)
 
         failed_upload_calls = []
@@ -280,8 +282,9 @@ class AuditRegressionTests(unittest.TestCase):
             failed_upload_calls.append((content, mime, file_name))
             raise OSError("FAL_KEY=must-not-leak")
 
+        failed_sleep_calls = []
         blocked_client = Client()
-        blocked = producer.FalHttpEditAdapter(blocked_client, failing_uploader)
+        blocked = producer.FalHttpEditAdapter(blocked_client, failing_uploader, sleeper=failed_sleep_calls.append)
         with self.assertRaises(producer.InputHostingError) as failure:
             blocked.submit_edit("openai/gpt-image-2/edit", {
                 "image_urls": ["data:image/png;base64,iVBORw0KGgo="],
@@ -291,7 +294,8 @@ class AuditRegressionTests(unittest.TestCase):
                 "output_format": "png",
                 "image_size": {"width": 1024, "height": 1024},
             })
-        self.assertEqual(len(failed_upload_calls), 2)
+        self.assertEqual(len(failed_upload_calls), 3)
+        self.assertEqual(failed_sleep_calls, [5.0, 10.0])
         self.assertEqual(blocked_client.calls, [])
         self.assertNotIn("must-not-leak", str(failure.exception))
 
