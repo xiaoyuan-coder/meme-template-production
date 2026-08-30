@@ -1,5 +1,5 @@
 {
-  "contractVersion": 1,
+  "contractVersion": 2,
   "replacementRequired": true,
   "provider": "fal",
   "providerEnvironment": {"credential": "FAL_KEY", "adapterFactory": "create_fal_adapter_from_environment"},
@@ -34,7 +34,7 @@
     ],
     "canvasRoutes": ["standalone_design", "print_artwork", "screen_content", "full_scene"],
     "promptSections": [
-      "task", "target", "dependencyClosure", "identityGroups", "canvas",
+      "task", "target", "dependencyClosure", "identityGroups", "featureAuthority", "canvas",
       "markPolicy", "frozenSet", "visualFeatures", "residualCleanup",
       "spatialRelations", "output"
     ],
@@ -43,6 +43,7 @@
       "target": "目标",
       "dependencyClosure": "依赖闭包",
       "identityGroups": "身份组",
+      "featureAuthority": "特征归属",
       "canvas": "画布",
       "markPolicy": "标记策略",
       "frozenSet": "冻结项",
@@ -53,6 +54,9 @@
     },
     "requiredVisualFeatures": [
       "medium", "composition", "proportions", "colorAndLight", "surface", "visualHook"
+    ],
+    "featureAuthorities": [
+      "target_identity", "template_mechanism", "derived_consistency"
     ],
     "markActions": {
       "platform_mark": ["remove"],

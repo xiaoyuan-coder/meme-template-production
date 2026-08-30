@@ -543,6 +543,59 @@ def _validate_region_actions(strategy: Mapping[str, Any]) -> None:
         seen_text.add(region_id)
 
 
+def _validate_feature_authority(strategy: Mapping[str, Any]) -> None:
+    """Separate redraw coverage from authority to change visible design."""
+
+    closure_ids = {
+        item["componentId"]
+        for item in strategy["dependencyClosure"]
+    }
+    decisions = strategy.get("featureAuthority")
+    if not isinstance(decisions, list) or not decisions:
+        raise ContractError("featureAuthority must cover every dependency component")
+    decision_ids: set[str] = set()
+    allowed = set(_contract()["replacement"]["featureAuthorities"])
+    for item in decisions:
+        if not isinstance(item, Mapping) or set(item) != {
+            "componentId", "authority", "instruction", "evidence"
+        }:
+            raise ContractError("featureAuthority entries must use the frozen fields")
+        component_id = _non_empty_text(item.get("componentId"), "feature authority componentId")
+        if component_id in decision_ids:
+            raise ContractError("featureAuthority componentIds must be unique")
+        if item.get("authority") not in allowed:
+            raise ContractError("featureAuthority uses an unknown authority")
+        _non_empty_text(item.get("instruction"), "feature authority instruction")
+        _non_empty_text(item.get("evidence"), "feature authority evidence")
+        decision_ids.add(component_id)
+    if decision_ids != closure_ids:
+        raise ContractError("featureAuthority must exactly cover the dependency closure")
+
+    operation_ids: set[str] = set()
+    for operation in strategy["operations"]:
+        for component_id in operation["targetComponentIds"]:
+            _non_empty_text(component_id, "operation target componentId")
+            operation_ids.add(component_id)
+    if operation_ids != closure_ids:
+        raise ContractError("operations must exactly cover the dependency closure")
+
+    mechanism = strategy.get("mechanismAnalysis")
+    if not isinstance(mechanism, Mapping) or set(mechanism) != {
+        "whyInteresting", "observableHookFeatures", "templateCriticalFeatures", "evidence"
+    }:
+        raise ContractError("mechanismAnalysis must use the frozen fields")
+    _non_empty_text(mechanism.get("whyInteresting"), "mechanismAnalysis.whyInteresting")
+    _non_empty_text(mechanism.get("evidence"), "mechanismAnalysis.evidence")
+    for field in ("observableHookFeatures", "templateCriticalFeatures"):
+        values = mechanism.get(field)
+        if (
+            not isinstance(values, list)
+            or not values
+            or not all(isinstance(value, str) and value.strip() for value in values)
+        ):
+            raise ContractError(f"mechanismAnalysis.{field} must contain observable facts")
+
+
 def _validate_operations_and_visuals(strategy: Mapping[str, Any]) -> None:
     replacement = _contract()["replacement"]
     operations = strategy.get("operations")
@@ -599,11 +652,13 @@ def validate_replacement_strategy(strategy: Mapping[str, Any]) -> None:
         "assetUnitIds",
         "assetBindingGroups",
         "dependencyClosure",
+        "featureAuthority",
         "textActions",
         "markActions",
         "operations",
         "targetCanvas",
         "frozenSet",
+        "mechanismAnalysis",
         "visualFeatures",
         "spatialRelations",
         "risks",
@@ -635,6 +690,7 @@ def validate_replacement_strategy(strategy: Mapping[str, Any]) -> None:
     _validate_identity_groups(strategy)
     _validate_region_actions(strategy)
     _validate_operations_and_visuals(strategy)
+    _validate_feature_authority(strategy)
     compiled_prompt = compile_replacement_prompt(strategy["promptSections"])
     if strategy["prompt"] != compiled_prompt:
         raise ContractError("prompt must equal the canonical structured prompt compilation")
@@ -676,11 +732,13 @@ def build_strategy_review_package(strategy: Mapping[str, Any]) -> dict[str, Any]
         "assetUnitIds": list(strategy["assetUnitIds"]),
         "assetBindingGroups": deepcopy_list(strategy["assetBindingGroups"]),
         "dependencyClosure": deepcopy_list(strategy["dependencyClosure"]),
+        "featureAuthority": deepcopy_list(strategy["featureAuthority"]),
         "textActions": deepcopy_list(strategy["textActions"]),
         "markActions": deepcopy_list(strategy["markActions"]),
         "operations": deepcopy_list(strategy["operations"]),
         "targetCanvas": dict(strategy["targetCanvas"]),
         "frozenSet": list(strategy["frozenSet"]),
+        "mechanismAnalysis": json.loads(json.dumps(strategy["mechanismAnalysis"], ensure_ascii=False)),
         "risks": deepcopy_list(strategy["risks"]),
         "promptSections": dict(strategy["promptSections"]),
         "prompt": strategy["prompt"],
@@ -883,12 +941,12 @@ def submit_authorized_generation(
         attempt_state["state"] = "input_hosting_failed"
         raise
     except ExternalAdapterError as exc:
-        attempt_state["state"] = "provider_rejected" if exc.outcome_known else "submission_unknown"
         if exc.status_code is not None:
             attempt_state["providerFailure"] = {
                 "statusCode": exc.status_code,
                 **({"errorType": exc.error_type} if exc.error_type else {}),
             }
+        attempt_state["state"] = "provider_rejected" if exc.outcome_known else "submission_unknown"
         raise
     except Exception:
         attempt_state["state"] = "submission_unknown"
@@ -898,8 +956,8 @@ def submit_authorized_generation(
     except ContractError:
         attempt_state["state"] = "provider_failed"
         raise
-    attempt_state["state"] = "provider_pending"
     attempt_state["providerResponse"] = summary
+    attempt_state["state"] = "provider_pending"
     return response
 
 
@@ -930,12 +988,12 @@ def record_no_request_reconciliation(
     observed = evidence.get("observedRequestIds")
     if not isinstance(observed, list) or observed:
         raise ContractError("non-empty provider history requires request-level reconciliation")
-    attempt_state["state"] = "provider_rejected"
     attempt_state["reconciliation"] = {
         **dict(evidence),
         "observedRequestCount": 0,
         "conclusion": "no_request_created",
     }
+    attempt_state["state"] = "provider_rejected"
     return dict(attempt_state)
 
 
@@ -1079,7 +1137,7 @@ def build_image_review_package(
             raise ContractError("image review evidence passed must be boolean")
         _non_empty_text(item.get("summary"), "image review evidence summary")
         evidence_by_gate[gate] = item
-    if set(evidence_by_gate) != required_gates:
+    if evidence_by_gate and set(evidence_by_gate) != required_gates:
         raise ContractError("image review evidence must cover every required visual gate")
     machine_blocked = bool(hard_failures) or any(
         not item["passed"] for item in evidence_by_gate.values()
@@ -1101,7 +1159,7 @@ def build_image_review_package(
         "hardFailures": deepcopy_list(hard_failures),
         "warnings": deepcopy_list(warnings),
         "revisionContext": json.loads(json.dumps(revision_context, ensure_ascii=False)),
-        "machineDecision": "blocked" if machine_blocked else "eligible_for_human_review",
+        "machineDecision": "advisory_findings" if machine_blocked else "eligible_for_human_review",
     }
 
 
@@ -1120,13 +1178,9 @@ def approve_generated_png(
     digest = sha256_bytes(png_bytes)
     if image_review_package.get("state") != "awaiting_image_approval":
         raise ContractError("image review package is not awaiting human approval")
-    if image_review_package.get("hardFailures"):
-        raise ContractError("visual hard failures cannot be overridden by approval")
-    if image_review_package.get("machineDecision") != "eligible_for_human_review":
-        raise ContractError("machine visual gates must pass before approval")
     evidence = image_review_package.get("evidence")
-    if not isinstance(evidence, list) or len(evidence) != len(required_image_review_gates()):
-        raise ContractError("reviewed machine evidence is incomplete")
+    if not isinstance(evidence, list):
+        raise ContractError("reviewed machine evidence must be an array")
     evidence_gates = set()
     for item in evidence:
         if not isinstance(item, Mapping):
@@ -1134,11 +1188,11 @@ def approve_generated_png(
         gate = item.get("gate")
         if gate in evidence_gates or gate not in required_image_review_gates():
             raise ContractError("reviewed machine evidence roles are invalid")
-        if item.get("passed") is not True:
-            raise ContractError("reviewed machine evidence contains a failed gate")
+        if not isinstance(item.get("passed"), bool):
+            raise ContractError("reviewed machine evidence contains an invalid verdict")
         _non_empty_text(item.get("summary"), "reviewed evidence summary")
         evidence_gates.add(gate)
-    if evidence_gates != set(required_image_review_gates()):
+    if evidence_gates and evidence_gates != set(required_image_review_gates()):
         raise ContractError("reviewed machine evidence does not cover every gate")
     package_image = image_review_package.get("generatedImage", {})
     review_package_sha = sha256_json(image_review_package)

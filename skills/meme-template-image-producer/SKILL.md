@@ -15,7 +15,7 @@ Produce only an Approved Template Image envelope. Never compile Gallery JSON, up
 4. Emit `build_strategy_review_package` and stop at `awaiting_strategy_approval` until a human approval binds the strategy, prompt, input image URI/SHA, reviewer, decision time, rule version, and revision.
 5. Before any paid request, run the deterministic preflight in `scripts/producer.py`. Read [generation-contract.md](references/generation-contract.md) for the fixed FAL contract and recovery rules.
 6. Submit through `submit_authorized_generation` with a durable attempt-state mapping. Persist its `submitting` state before the adapter call. Reuse `provider_pending`; reconcile `submission_unknown` against official FAL request history; create a new strategy revision and obtain fresh approval before any new paid request.
-7. Build the image review package. Read [reviews-and-revisions.md](references/reviews-and-revisions.md) for hard evidence, failure classes, and revision history.
+7. After the provider result is saved as a valid PNG, build the image review package directly from source/generated image facts. Read [reviews-and-revisions.md](references/reviews-and-revisions.md) for the human decision and revision history; ordinary production does not run a Codex visual audit.
 8. Stop at `awaiting_image_approval`. Only a fresh human approval bound to the current PNG SHA, review-package SHA, reviewer, decision time, rule version, and revision may create the minimal Approved Template Image envelope.
 9. For batch or external workbench integration, read [portable-batch.md](references/portable-batch.md). At every review or approved-image stop, call `write_production_index` so the external scanner sees the current revision. Isolate 1–100 items and continue unaffected items.
 

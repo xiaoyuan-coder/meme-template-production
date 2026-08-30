@@ -26,7 +26,7 @@
       }
     },
     "evidence": {
-      "type": "array", "minItems": 12, "maxItems": 12,
+      "type": "array", "minItems": 0, "maxItems": 12,
       "items": {
         "type": "object", "additionalProperties": false,
         "required": ["gate", "passed", "summary"],
@@ -46,6 +46,6 @@
     "hardFailures": {"type": "array", "items": {"type": "object"}},
     "warnings": {"type": "array", "items": {"type": "object"}},
     "revisionContext": {"type": "object"},
-    "machineDecision": {"enum": ["blocked", "eligible_for_human_review"]}
+    "machineDecision": {"enum": ["blocked", "advisory_findings", "eligible_for_human_review"]}
   }
 }

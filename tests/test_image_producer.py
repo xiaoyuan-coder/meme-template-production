@@ -4,6 +4,7 @@ import copy
 import json
 import tempfile
 import unittest
+from collections.abc import MutableMapping
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
@@ -24,6 +25,40 @@ class FakeFal:
     def submit_edit(self, model, payload):
         self.calls.append((model, payload))
         return {"request_id": "fake-request"}
+
+
+class SchemaPersistingAttempt(MutableMapping):
+    """Mirror the production store: bulk writes are atomic, field writes persist immediately."""
+
+    def __init__(self, schema):
+        self._value = {}
+        self._validator = Draft202012Validator(schema)
+
+    def __getitem__(self, key):
+        return self._value[key]
+
+    def __setitem__(self, key, value):
+        candidate = {**self._value, key: value}
+        self._validator.validate(candidate)
+        self._value = candidate
+
+    def __delitem__(self, key):
+        candidate = dict(self._value)
+        del candidate[key]
+        self._validator.validate(candidate)
+        self._value = candidate
+
+    def __iter__(self):
+        return iter(self._value)
+
+    def __len__(self):
+        return len(self._value)
+
+    def update(self, *args, **kwargs):
+        candidate = dict(self._value)
+        candidate.update(*args, **kwargs)
+        self._validator.validate(candidate)
+        self._value = candidate
 
 
 def valid_request():
@@ -178,6 +213,53 @@ class ImageProducerTests(unittest.TestCase):
         invalid["replacementValue"] = ""
         with self.assertRaises(producer.ContractError):
             producer.validate_replacement_strategy(invalid)
+
+    def test_provider_transition_remains_valid_for_eagerly_persisted_attempt_store(self):
+        strategy = valid_strategy(producer)
+        approval = valid_strategy_approval(strategy)
+        schema = json.loads((
+            ROOT / "skills/meme-template-image-producer/references/contracts/generation-attempt.schema.json"
+        ).read_text(encoding="utf-8"))
+        attempt = SchemaPersistingAttempt(schema)
+
+        response = producer.submit_authorized_generation(
+            strategy, approval, FakeFal(), "fixture://source.png",
+            input_image_bytes=SOURCE_INPUT_BYTES, attempt_state=attempt,
+        )
+
+        self.assertEqual(response, {"request_id": "fake-request"})
+        self.assertEqual(attempt["state"], "provider_pending")
+        self.assertEqual(attempt["providerResponse"], {"request_id": "fake-request"})
+
+    def test_provider_rejection_transition_persists_evidence_before_terminal_state(self):
+        class RejectedFal(FakeFal):
+            def submit_edit(self, model, payload):
+                super().submit_edit(model, payload)
+                raise producer.ExternalAdapterError(
+                    "provider rejected request",
+                    status_code=422,
+                    error_type="validation_error",
+                    outcome_known=True,
+                )
+
+        strategy = valid_strategy(producer)
+        approval = valid_strategy_approval(strategy)
+        schema = json.loads((
+            ROOT / "skills/meme-template-image-producer/references/contracts/generation-attempt.schema.json"
+        ).read_text(encoding="utf-8"))
+        attempt = SchemaPersistingAttempt(schema)
+
+        with self.assertRaises(producer.ExternalAdapterError):
+            producer.submit_authorized_generation(
+                strategy, approval, RejectedFal(), "fixture://source.png",
+                input_image_bytes=SOURCE_INPUT_BYTES, attempt_state=attempt,
+            )
+
+        self.assertEqual(attempt["state"], "provider_rejected")
+        self.assertEqual(attempt["providerFailure"], {
+            "statusCode": 422,
+            "errorType": "validation_error",
+        })
 
     def test_submission_unknown_never_speculatively_resubmits(self):
         class UnknownFal(FakeFal):
@@ -398,12 +480,43 @@ class ImageProducerTests(unittest.TestCase):
         with self.assertRaises(producer.ContractError):
             producer.validate_replacement_strategy(blanket_cleanup)
 
+    def test_feature_authority_separates_redraw_scope_from_semantic_change(self):
+        strategy = valid_strategy(producer)
+        strategy["featureAuthority"][0] = {
+            "componentId": "cat-body",
+            "authority": "template_mechanism",
+            "instruction": "重绘完整身体以接入新身份，同时保持原来的身体比例和拥抱姿态",
+            "evidence": "身体轮廓承担拥抱机制，身份差异由头部与毛色表达",
+        }
+        strategy["promptSections"]["featureAuthority"] = [
+            "新身份只接管头部与毛色特征",
+            "身体比例和拥抱轮廓由模板保持，影子只作派生一致性重绘",
+        ]
+        strategy["prompt"] = producer.compile_replacement_prompt(strategy["promptSections"])
+        producer.validate_replacement_strategy(strategy)
+
+        missing = copy.deepcopy(strategy)
+        missing["featureAuthority"].pop()
+        with self.assertRaises(producer.ContractError):
+            producer.validate_replacement_strategy(missing)
+
+        unknown = copy.deepcopy(strategy)
+        unknown["featureAuthority"][0]["authority"] = "replacement_owns_everything"
+        with self.assertRaises(producer.ContractError):
+            producer.validate_replacement_strategy(unknown)
+
+        shallow_hook = copy.deepcopy(strategy)
+        shallow_hook["mechanismAnalysis"]["observableHookFeatures"] = []
+        with self.assertRaises(producer.ContractError):
+            producer.validate_replacement_strategy(shallow_hook)
+
     def test_prompt_sections_are_canonical_and_canvas_size_is_deterministic(self):
         strategy = valid_strategy(producer)
         package = producer.build_strategy_review_package(strategy)
         self.assertEqual(package["state"], "awaiting_strategy_approval")
         self.assertEqual(package["expectedFalCalls"], 1)
         self.assertEqual(strategy["prompt"].count("任务："), 1)
+        self.assertEqual(strategy["prompt"].count("特征归属："), 1)
         changed = copy.deepcopy(strategy)
         changed["prompt"] += "\nextra"
         with self.assertRaises(producer.ContractError):
@@ -445,7 +558,7 @@ class ImageProducerTests(unittest.TestCase):
         self.assertEqual(first, reordered)
         self.assertEqual(set(first), {"item-a", "item-b", "item-c"})
 
-    def test_visual_hard_failure_cannot_be_human_overridden(self):
+    def test_fresh_human_image_approval_can_accept_advisory_machine_findings(self):
         digest = producer.sha256_bytes(PNG_BYTES)
         facts = {"uri": "fixture://bad.png", "width": 1024, "height": 1024}
         package = producer.build_image_review_package(
@@ -455,10 +568,10 @@ class ImageProducerTests(unittest.TestCase):
             revision_context=producer.build_revision_review_context([], 1, []),
         )
         review = valid_image_approval(package)
-        with self.assertRaises(producer.ContractError):
-            producer.approve_generated_png(
-                PNG_BYTES, review, package, rule_version="0.2.0", revision=1
-            )
+        envelope = producer.approve_generated_png(
+            PNG_BYTES, review, package, rule_version="0.2.0", revision=1
+        )
+        self.assertEqual(envelope["image"]["sha256"], digest)
 
     def test_image_batch_isolation_and_bounds(self):
         items = [{"itemId": "bad", "revision": 1}, {"itemId": "good", "revision": 1}]

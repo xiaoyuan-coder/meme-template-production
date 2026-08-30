@@ -64,6 +64,10 @@ _Avoid_: Visual inventory, open default value, batch-generic filler
 A per-identity decision that assigns each visible trait to the uploaded identity or the Template Mechanism, with the template retaining only the smallest mechanism-critical exceptions.
 _Avoid_: Copy all source-image traits, freeze the whole template subject
 
+**Replacement Feature Authority**:
+A first-stage per-component decision that separates the pixels which must be redrawn from the visible design allowed to change. Target-owned features carry the new identity, template-owned features preserve the source mechanism, and derived features only reconcile contact, lighting, or cleanup.
+_Avoid_: Treat the dependency closure as permission for the new identity to redesign every covered component
+
 **Free-editable Content**:
 Meaningful picture content kept as natural literal wording in the Prompt Template so it can be changed in Free-edit Mode without becoming a Slot.
 _Avoid_: Hidden constraint, omitted content

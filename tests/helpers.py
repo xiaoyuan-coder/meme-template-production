@@ -105,6 +105,7 @@ def valid_strategy(producer_module, *, item_id: str = "item-a", revision: int = 
         "target": "将中央的来源猫替换为一只不同的橘白猫",
         "dependencyClosure": ["同步重绘全身、毛色、项圈和地面影子"],
         "identityGroups": ["单猫身份组一对一替换"],
+        "featureAuthority": ["新猫接管身体身份与毛色；影子只随新轮廓重新贴合"],
         "canvas": "保持完整正方形场景与当前裁切",
         "markPolicy": "删除右下角作者水印，保留猫旁的装饰星星贴纸",
         "frozenSet": ["保持拥抱动作、中心构图、温暖手绘媒介和原文笑点"],
@@ -167,6 +168,20 @@ def valid_strategy(producer_module, *, item_id: str = "item-a", revision: int = 
             {"componentId": "cat-body", "type": "full_body"},
             {"componentId": "cat-shadow", "type": "shadow"},
         ],
+        "featureAuthority": [
+            {
+                "componentId": "cat-body",
+                "authority": "target_identity",
+                "instruction": "使用新猫的脸、身体、毛色和项圈身份特征",
+                "evidence": "完整猫主体承担本次身份替换",
+            },
+            {
+                "componentId": "cat-shadow",
+                "authority": "derived_consistency",
+                "instruction": "按新猫轮廓重绘接触影子",
+                "evidence": "影子只负责地面接触与光照连续",
+            },
+        ],
         "textActions": [{
             "regionId": "joke-text", "role": "joke", "action": "preserve", "exactText": "抱紧一点"
         }],
@@ -187,6 +202,12 @@ def valid_strategy(producer_module, *, item_id: str = "item-a", revision: int = 
             "route": "full_scene", "targetRegion": "full-canvas", "excludedRegions": []
         },
         "frozenSet": ["hugging-action", "center-composition", "joke-text"],
+        "mechanismAnalysis": {
+            "whyInteresting": "人把猫紧紧抱在中央形成直接而温暖的互动",
+            "observableHookFeatures": ["双臂环抱", "猫位于画面中心", "身体与手臂有明确接触"],
+            "templateCriticalFeatures": ["拥抱动作", "中心构图", "温暖手绘媒介"],
+            "evidence": "移除拥抱接触或中心关系后模板玩法不再成立",
+        },
         "visualFeatures": {
             "medium": "温暖手绘插画",
             "composition": "主体居中",

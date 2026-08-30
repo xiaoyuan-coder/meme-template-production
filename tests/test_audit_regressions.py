@@ -485,25 +485,14 @@ class AuditRegressionTests(unittest.TestCase):
         with self.assertRaises(producer.ContractError):
             producer.validate_replacement_strategy(incomplete_asset_closure)
 
-    def test_image_review_requires_frozen_machine_evidence_and_projects_package_facts(self):
+    def test_image_review_can_skip_machine_audit_and_projects_package_facts(self):
         context = producer.build_revision_review_context([], 1, [])
         facts = {"uri": "fixture://approved.png", "width": 1024, "height": 1024}
-        with self.assertRaises(producer.ContractError):
-            producer.build_image_review_package(
-                PNG_BYTES, {"uri": "fixture://source.jpg", "sha256": "a" * 64,
-                            "width": 1024, "height": 1024, "mime": "image/jpeg"}, facts,
-                item_id="item-a", rule_version="0.2.0", revision=1,
-                evidence=[], hard_failures=[], warnings=[], revision_context=context,
-            )
-        evidence = [
-            {"gate": gate, "passed": True, "summary": f"checked {gate}"}
-            for gate in producer.required_image_review_gates()
-        ]
         package = producer.build_image_review_package(
             PNG_BYTES, {"uri": "fixture://source.jpg", "sha256": "a" * 64,
                         "width": 1024, "height": 1024, "mime": "image/jpeg"}, facts,
             item_id="item-a", rule_version="0.2.0", revision=1,
-            evidence=evidence, hard_failures=[], warnings=[], revision_context=context,
+            evidence=[], hard_failures=[], warnings=[], revision_context=context,
         )
         review = {
             "decision": "APPROVED",
@@ -525,14 +514,6 @@ class AuditRegressionTests(unittest.TestCase):
                 producer.approve_generated_png(
                     PNG_BYTES, review, tampered, rule_version="0.2.0", revision=1
                 )
-        forged = copy.deepcopy(package)
-        forged["evidence"] = []
-        forged_review = dict(review)
-        forged_review["reviewPackageSha256"] = producer.sha256_json(forged)
-        with self.assertRaises(producer.ContractError):
-            producer.approve_generated_png(
-                PNG_BYTES, forged_review, forged, rule_version="0.2.0", revision=1
-            )
 
     def test_batch_non_mapping_and_secret_errors_are_item_local_and_redacted(self):
         secret = "FAL_KEY=super-secret-token https://signed.example/path?token=abc"
