@@ -365,6 +365,37 @@ def _non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
+def _language_scripts(value: str) -> set[str]:
+    """Return only scripts with enough signal for a deterministic mismatch gate."""
+
+    scripts: set[str] = set()
+    if re.search(r"[A-Za-z]", value):
+        scripts.add("latin")
+    if re.search(r"[\u4e00-\u9fff]", value):
+        scripts.add("han")
+    if re.search(r"[\u3040-\u30ff]", value):
+        scripts.add("japanese")
+    if re.search(r"[\uac00-\ud7af]", value):
+        scripts.add("korean")
+    return scripts
+
+
+def _slot_value_language_compatible(default_value: str, suggestion: str) -> bool:
+    default_scripts = _language_scripts(default_value)
+    suggestion_scripts = _language_scripts(suggestion)
+    if not default_scripts or not suggestion_scripts:
+        return True
+    if default_scripts & suggestion_scripts:
+        return True
+    # Kanji-only Japanese copy is indistinguishable from Han text without a
+    # semantic language model, so leave that ambiguous case to self-review.
+    if "japanese" in default_scripts and "han" in suggestion_scripts:
+        return True
+    if "han" in default_scripts and "japanese" in suggestion_scripts:
+        return True
+    return False
+
+
 def _flatten_text(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -781,6 +812,13 @@ def validate_authoring_contract(
                 for item in suggestion_checks
             ):
                 raise ContractError("recommendations must pass axis, granularity, and mechanism checks")
+            if any(
+                not _slot_value_language_compatible(evidence["defaultValue"], suggestion)
+                for suggestion in suggestions
+            ):
+                raise ContractError(
+                    "recommendations must use the same language script as the default value"
+                )
             if not {evidence["defaultValue"], *suggestions}.issubset(set(open_facts)):
                 raise ContractError("openVisualFacts must include the default and all recommendations")
         image_mode = slot.get("image")

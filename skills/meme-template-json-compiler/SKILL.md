@@ -22,6 +22,7 @@ Consume only an Approved Template Image envelope for visual semantics. The perso
 
 - Input and runtime semantics are version 2; identity bindings explicitly declare `clothingOwnership`.
 - Every slot is optional and text-capable. Image input is an additive capability using the frozen 256×256 minimum and full source option set; text+image resolves with `image_over_text`.
+- Every slot has exactly three recommendations on the same semantic axis, granularity, language, and copy form as its default; clear cross-script language mismatches fail before review.
 - Prompt Template contains every slot exactly once and stays user-facing. Backend generation constraints remain in runtime semantics; open defaults and recommendations never reappear as fixed visual-contract facts.
 - Metadata includes 5–8 tags and at least one exact official major category.
 - Key identity comes only from the registry protocol; filename, directory, batch number, title, visual similarity, and approved-image SHA cannot prove source identity.

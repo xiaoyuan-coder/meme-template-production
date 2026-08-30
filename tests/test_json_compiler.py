@@ -333,6 +333,34 @@ class GalleryAndOssTests(unittest.TestCase):
         with self.assertRaises(compiler.ContractError):
             compiler.validate_authoring_contract(overdescribed, draft, envelope)
 
+    def test_suggestions_keep_the_default_language_and_copy_form(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 1, "status": "approved",
+            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        draft = valid_formal_draft()
+        slot = draft["inputSchema"]["slots"][0]
+        slot["text"]["defaultValue"] = "How Cute"
+        slot["text"]["suggestions"] = ["真可爱", "就这？", "有点意思"]
+        draft["promptTemplate"] = '双臂紧紧抱住画面中央的{{ subject | "How Cute" }}。'
+
+        analysis = valid_approved_analysis(image_sha)
+        evidence = analysis["slotEvidence"]["subject"]
+        evidence["defaultValue"] = "How Cute"
+        evidence["suggestionChecks"] = [
+            {"value": value, "sameAxis": True, "sameGranularity": True,
+             "mechanismCompatible": True}
+            for value in ("真可爱", "就这？", "有点意思")
+        ]
+        evidence["openVisualFacts"] = ["How Cute", "真可爱", "就这？", "有点意思"]
+        analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
+        analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
+
+        with self.assertRaisesRegex(compiler.ContractError, "language"):
+            compiler.validate_authoring_contract(analysis, draft, envelope)
+
     def test_official_major_tag_and_frozen_image_profile_are_required(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
