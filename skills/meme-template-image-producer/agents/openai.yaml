@@ -1,4 +1,4 @@
 interface:
   display_name: "Meme Template Image Producer"
-  short_description: "Approve replacement-based meme template image production"
-  default_prompt: "Use $meme-template-image-producer to create and approve a replacement-based meme template image."
+  short_description: "Batch-produce, approve, and upload meme template images"
+  default_prompt: "Use $meme-template-image-producer to batch-produce replacement-based template images, show both approvals in chat, and upload approved PNGs."

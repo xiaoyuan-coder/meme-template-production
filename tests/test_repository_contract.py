@@ -17,7 +17,8 @@ class RepositoryContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8").splitlines()
         self.assertIn("fal-client>=1,<2", image_requirements)
         self.assertIn("httpx>=0.28,<1", image_requirements)
-        self.assertIn("oss2>=2.19,<3", json_requirements)
+        self.assertIn("oss2>=2.19,<3", image_requirements)
+        self.assertNotIn("oss2>=2.19,<3", json_requirements)
 
     def test_release_points_to_exact_immutable_snapshot(self):
         release = json.loads((ROOT / "release.json").read_text(encoding="utf-8"))
@@ -37,9 +38,13 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertNotIn("T1", text, path)
             self.assertNotIn("contentRegenerationModel", text, path)
         compiler_code = (ROOT / "skills/meme-template-json-compiler/scripts/compiler.py").read_text(encoding="utf-8")
+        producer_code = (ROOT / "skills/meme-template-image-producer/scripts/producer.py").read_text(encoding="utf-8")
         self.assertNotIn("submit_edit", compiler_code)
         self.assertNotIn("openai/gpt-image", compiler_code)
         self.assertNotIn("fal_client", compiler_code.lower())
+        self.assertNotIn("AliyunOssAdapter", compiler_code)
+        self.assertNotIn("finalize_approved_json", compiler_code)
+        self.assertIn("finalize_approved_template_image", producer_code)
 
     def test_generic_runtime_files_have_no_personal_absolute_path(self):
         runtime_files = [
@@ -66,7 +71,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertTrue(snapshot.is_file())
         self.assertEqual(
             set((skill / "requirements.txt").read_text(encoding="utf-8").splitlines()),
-            {"jsonschema>=4.26,<5", "oss2>=2.19,<3"},
+            {"jsonschema>=4.26,<5"},
         )
         self.assertEqual(
             hashlib.sha256(snapshot.read_bytes()).hexdigest(),

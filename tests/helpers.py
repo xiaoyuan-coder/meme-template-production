@@ -236,7 +236,7 @@ def valid_approved_analysis(image_sha: str) -> dict:
         draft, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")).hexdigest()
     return {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "approvedImageSha256": image_sha,
         "visualMechanism": "中央主体紧抱宠物的温暖手绘场景",
         "templateValue": {
@@ -244,6 +244,16 @@ def valid_approved_analysis(image_sha: str) -> dict:
             "templateHook": "把中央被拥抱对象换成用户指定的主体",
             "fixedMechanism": ["双臂从前方紧抱中央主体", "中央近景构图"],
             "backendOnlyFacts": ["身份目标完整重绘并统一为温暖手绘媒介"],
+        },
+        "playDecisionModel": {
+            "funProposition": "用力拥抱与宠物被挤在中央的反应形成温暖又有趣的互动",
+            "userRecreationWish": "用户想把自己的宠物放进被紧紧抱住的场景",
+            "coreUserDecisions": [{
+                "decisionId": "choose_hugged_subject",
+                "description": "选择中央被拥抱的宠物身份",
+                "slotId": "subject",
+                "evidence": "中央宠物是用户个性化结果的焦点",
+            }],
         },
         "componentGraph": [
             {"componentId": "subject_main", "role": "identity_subject", "region": "center"}
@@ -263,6 +273,20 @@ def valid_approved_analysis(image_sha: str) -> dict:
             "slotId": "subject", "componentId": "subject_main", "selected": True,
             "selectionReason": "identity_control", "exclusionReason": None,
         }],
+        "slotCoverageReview": {
+            "selectedSlotIds": ["subject"],
+            "axes": {
+                axis: {
+                    "candidateComponentIds": ["subject_main"] if axis == "subject" else [],
+                    "selectedSlotIds": ["subject"] if axis == "subject" else [],
+                    "evidence": f"approved image reviewed for {axis}",
+                }
+                for axis in (
+                    "subject", "text", "object", "clothing", "color", "prop", "scene",
+                    "nested_content",
+                )
+            },
+        },
         "counts": {
             "identityCount": 1,
             "visualInstanceCount": 1,
@@ -300,10 +324,13 @@ def valid_approved_analysis(image_sha: str) -> dict:
         "slotEvidence": {
             "subject": {
                 "userMotivation": True,
+                "independentUserChoice": True,
+                "meaningfulVariation": True,
                 "visuallyVisible": True,
                 "modelControllable": True,
                 "mechanismPreserved": True,
                 "selectionReason": "identity_control",
+                "decisionId": "choose_hugged_subject",
                 "defaultValue": "橘白猫",
                 "semanticAxis": "中央被拥抱主体的身份",
                 "granularity": "单一主体类型",
@@ -363,19 +390,6 @@ def valid_approved_analysis(image_sha: str) -> dict:
             "slotIds": ["subject"],
             "freeEditableRegionIds": [],
         },
-        "singleSlotExhaustion": {
-            "selectedSlotIds": ["subject"],
-            "axes": {
-                axis: {
-                    "candidateSlotIds": ["subject"] if axis == "subject" else [],
-                    "evidence": f"approved image reviewed for {axis}",
-                }
-                for axis in (
-                    "subject", "text", "object", "clothing", "color", "prop", "scene",
-                    "nested_content",
-                )
-            },
-        },
         "translationEquivalences": [],
         "semanticModel": {
             "promptTemplate": draft["promptTemplate"],
@@ -395,7 +409,8 @@ def valid_approved_analysis(image_sha: str) -> dict:
             "reviewedDraftSha256": draft_sha,
             "checks": {
                 check: True for check in (
-                    "templateValueFocused", "slotScopeMinimal", "imageModesJustified",
+                    "templateValueFocused", "playHypothesisGrounded", "slotRecallComplete",
+                    "slotPrecisionComplete", "semanticUnitsCoherent", "slotScopeMinimal", "imageModesJustified",
                     "groupPolicyJustified", "featureAuthorityComplete", "textRoutingComplete",
                     "textEditLayersComplete", "titlePortable",
                     "copyUserFacingAndSearchable",

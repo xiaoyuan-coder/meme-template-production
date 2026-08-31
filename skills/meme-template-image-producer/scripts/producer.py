@@ -65,6 +65,14 @@ class FalEditAdapter(Protocol):
     def submit_edit(self, model: str, payload: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
 
+class OssAdapter(Protocol):
+    def head(self, object_key: str) -> Mapping[str, Any] | None: ...
+
+    def put_create_once(
+        self, object_key: str, content: bytes, metadata: Mapping[str, Any]
+    ) -> Mapping[str, Any]: ...
+
+
 class FalHttpEditAdapter:
     """One-shot FAL queue adapter; the injected HTTP client must not retry POSTs."""
 
@@ -193,6 +201,75 @@ def create_fal_adapter_from_environment(
         return upload(content, mime, file_name=file_name)
 
     return FalHttpEditAdapter(client, uploader)
+
+
+class AliyunOssAdapter:
+    """Create-once OSS adapter with content identity metadata."""
+
+    def __init__(self, bucket: Any) -> None:
+        self._bucket = bucket
+
+    @staticmethod
+    def _header(headers: Mapping[str, Any], name: str) -> Any:
+        return headers.get(name) or headers.get(name.lower()) or headers.get(name.title())
+
+    def head(self, object_key: str) -> Mapping[str, Any] | None:
+        try:
+            result = self._bucket.head_object(object_key)
+        except Exception as exc:
+            if getattr(exc, "status", None) == 404:
+                return None
+            raise ExternalAdapterError("OSS metadata lookup failed") from None
+        headers = getattr(result, "headers", {}) or {}
+        return {
+            "objectKey": object_key,
+            "sha256": self._header(headers, "x-oss-meta-sha256"),
+            "byteLength": int(self._header(headers, "x-oss-meta-byte-length") or 0),
+            "remoteIdentity": self._header(headers, "x-oss-meta-remote-identity"),
+            "requestIdentity": self._header(headers, "x-oss-meta-request-identity"),
+        }
+
+    def put_create_once(
+        self, object_key: str, content: bytes, metadata: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        headers = {
+            "x-oss-forbid-overwrite": "true",
+            "Content-Type": "image/png",
+            "x-oss-meta-sha256": str(metadata["sha256"]),
+            "x-oss-meta-byte-length": str(metadata["byteLength"]),
+            "x-oss-meta-remote-identity": str(metadata["remoteIdentity"]),
+            "x-oss-meta-request-identity": str(metadata["requestIdentity"]),
+        }
+        try:
+            result = self._bucket.put_object(object_key, content, headers=headers)
+        except Exception:
+            raise ExternalAdapterError("OSS create-once upload failed") from None
+        response = {"objectKey": object_key, **dict(metadata)}
+        request_id = getattr(result, "request_id", None)
+        if isinstance(request_id, str) and request_id:
+            response["providerRequestId"] = request_id
+        return response
+
+
+def create_aliyun_oss_adapter_from_environment(
+    environ: Mapping[str, str] | None = None,
+    *,
+    module_loader: Callable[[str], Any] = importlib.import_module,
+) -> AliyunOssAdapter:
+    env = os.environ if environ is None else environ
+    names = ("OSS_ENDPOINT", "OSS_BUCKET_NAME", "OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_SECRET")
+    if any(not isinstance(env.get(name), str) or not env[name].strip() for name in names):
+        raise AdapterConfigurationError("OSS credentials or target configuration are unavailable")
+    try:
+        oss2 = module_loader("oss2")
+    except (ImportError, ModuleNotFoundError):
+        raise AdapterConfigurationError("aliyun-oss2 dependency is unavailable") from None
+    try:
+        auth = oss2.Auth(env["OSS_ACCESS_KEY_ID"], env["OSS_ACCESS_KEY_SECRET"])
+        bucket = oss2.Bucket(auth, env["OSS_ENDPOINT"], env["OSS_BUCKET_NAME"])
+    except Exception:
+        raise AdapterConfigurationError("OSS adapter initialization failed") from None
+    return AliyunOssAdapter(bucket)
 
 
 _SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -759,8 +836,8 @@ def allocate_replacement_fingerprints(
 ) -> dict[str, str]:
     """Allocate compatible fingerprints deterministically with minimal cross-item sharing."""
 
-    if not candidates_by_item or len(candidates_by_item) > _contract()["batch"]["maximumItems"]:
-        raise ContractError("replacement allocation requires 1–100 items")
+    if not candidates_by_item or len(candidates_by_item) > _contract()["batch"]["maximumJobItems"]:
+        raise ContractError("replacement allocation requires 1–5000 job items")
     normalized: dict[str, tuple[str, ...]] = {}
     for item_id, candidates in candidates_by_item.items():
         _non_empty_text(item_id, "batch itemId")
@@ -785,6 +862,33 @@ def allocate_replacement_fingerprints(
         allocations[item_id] = selected
         usage[selected] = usage.get(selected, 0) + 1
     return allocations
+
+
+def build_replacement_diversity_report(
+    candidates_by_item: Mapping[str, Sequence[str]],
+) -> dict[str, Any]:
+    """Allocate replacements and expose any locally avoidable identity concentration."""
+
+    allocations = allocate_replacement_fingerprints(candidates_by_item)
+    usage: dict[str, int] = {}
+    for fingerprint in allocations.values():
+        usage[fingerprint] = usage.get(fingerprint, 0) + 1
+    avoidable: list[dict[str, Any]] = []
+    for item_id, selected in sorted(allocations.items()):
+        alternatives = sorted(set(candidates_by_item[item_id]) - {selected})
+        lower_usage = [value for value in alternatives if usage.get(value, 0) < usage[selected]]
+        if lower_usage:
+            avoidable.append({
+                "itemId": item_id,
+                "selectedFingerprint": selected,
+                "lowerUsageAlternatives": lower_usage,
+            })
+    return {
+        "allocations": allocations,
+        "usageByFingerprint": dict(sorted(usage.items())),
+        "avoidableConcentration": avoidable,
+        "status": "PASS" if not avoidable else "REVIEW",
+    }
 
 
 def compile_fal_request(request: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -1171,7 +1275,7 @@ def approve_generated_png(
     rule_version: str,
     revision: int,
 ) -> dict[str, Any]:
-    """Create the only downstream envelope after a fresh human image approval."""
+    """Validate a fresh human image approval before the OSS mutation boundary."""
 
     if not png_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
         raise ContractError("approved image must be PNG bytes")
@@ -1222,17 +1326,140 @@ def approve_generated_png(
         raise ContractError("approved image dimensions are invalid")
     if not isinstance(uri, str) or not uri or mime != "image/png":
         raise ContractError("approved image URI is required")
+    return {"sha256": digest, "width": width, "height": height, "mime": mime}
+
+
+def oss_intent(png_bytes: bytes) -> dict[str, Any]:
+    """Build the global content-addressed image identity before any OSS call."""
+
+    if not png_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ContractError("OSS input must be the exact approved PNG bytes")
+    digest = sha256_bytes(png_bytes)
+    oss = _contract()["oss"]
+    object_key = oss["objectKeyTemplate"].format(approvedImageSha256=digest)
+    public_url = f"{oss['baseUrl']}/{object_key}"
+    request_identity = sha256_json({
+        "objectKey": object_key,
+        "sha256": digest,
+        "byteLength": len(png_bytes),
+        "remoteIdentity": object_key,
+    })
     return {
-        "schemaVersion": 1,
-        "status": "approved",
-        "image": {
-            "uri": uri,
-            "sha256": digest,
-            "width": width,
-            "height": height,
-            "mime": mime,
-        },
+        "approvedImageSha256": digest,
+        "objectDigest": digest,
+        "byteLength": len(png_bytes),
+        "objectKey": object_key,
+        "remoteIdentity": object_key,
+        "requestIdentity": request_identity,
+        "publicHttpsUrl": public_url,
     }
+
+
+def validate_oss_receipt(receipt: Mapping[str, Any]) -> None:
+    schema = json.loads((
+        _SKILL_ROOT / "references/contracts/oss-receipt.schema.json"
+    ).read_text(encoding="utf-8"))
+    errors = sorted(
+        Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(receipt),
+        key=lambda error: list(error.path),
+    )
+    if errors:
+        raise ContractError("OSS receipt invalid: " + errors[0].message)
+    if receipt["objectDigest"] != receipt["approvedImageSha256"]:
+        raise ContractError("OSS object digest differs from the Approved Image SHA")
+    if receipt["providerReceiptDigest"] != sha256_json(receipt["providerReceipt"]):
+        raise ContractError("OSS provider receipt digest mismatch")
+
+
+def finalize_approved_template_image(
+    png_bytes: bytes,
+    review: Mapping[str, Any],
+    image_review_package: Mapping[str, Any],
+    adapter: OssAdapter,
+    *,
+    rule_version: str,
+    revision: int,
+    uploaded_at: str,
+    existing_receipt: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Approve, upload, reconcile, and emit the only downstream image envelope."""
+
+    image = approve_generated_png(
+        png_bytes, review, image_review_package,
+        rule_version=rule_version, revision=revision,
+    )
+    _non_empty_text(uploaded_at, "uploadedAt")
+    intent = oss_intent(png_bytes)
+
+    if existing_receipt is not None:
+        validate_oss_receipt(existing_receipt)
+        receipt_identity = {name: existing_receipt.get(name) for name in intent}
+        if receipt_identity != intent:
+            raise ContractError("existing OSS receipt does not match the approved upload intent")
+        receipt = deepcopy(dict(existing_receipt))
+    else:
+        expected_remote = {
+            "objectKey": intent["objectKey"],
+            "sha256": intent["approvedImageSha256"],
+            "byteLength": intent["byteLength"],
+            "remoteIdentity": intent["remoteIdentity"],
+            "requestIdentity": intent["requestIdentity"],
+        }
+        remote = adapter.head(intent["objectKey"])
+        if remote is not None:
+            if not isinstance(remote, Mapping) or {
+                name: remote.get(name) for name in expected_remote
+            } != expected_remote:
+                raise ContractError("existing OSS object conflicts; overwrite prohibited")
+            provider_receipt = {"reused": True, **expected_remote}
+        else:
+            raw_put = adapter.put_create_once(
+                intent["objectKey"], png_bytes,
+                {
+                    "sha256": intent["approvedImageSha256"],
+                    "byteLength": intent["byteLength"],
+                    "remoteIdentity": intent["remoteIdentity"],
+                    "requestIdentity": intent["requestIdentity"],
+                },
+            )
+            if not isinstance(raw_put, Mapping) or {
+                name: raw_put.get(name) for name in expected_remote
+            } != expected_remote:
+                raise ContractError("OSS create response differs from the approved upload intent")
+            reconciled = adapter.head(intent["objectKey"])
+            if not isinstance(reconciled, Mapping) or {
+                name: reconciled.get(name) for name in expected_remote
+            } != expected_remote:
+                raise ContractError("OSS object reconciliation differs from the approved upload intent")
+            provider_receipt = {
+                "created": True,
+                **expected_remote,
+                **({"providerRequestId": raw_put["providerRequestId"]}
+                   if isinstance(raw_put.get("providerRequestId"), str) else {}),
+            }
+        receipt = {
+            **intent,
+            "providerReceipt": provider_receipt,
+            "providerReceiptDigest": sha256_json(provider_receipt),
+            "uploadedAt": uploaded_at,
+        }
+        validate_oss_receipt(receipt)
+
+    envelope = {
+        "schemaVersion": 2,
+        "status": "approved_uploaded",
+        "image": {"uri": receipt["publicHttpsUrl"], **image},
+    }
+    envelope_schema = json.loads((
+        _SKILL_ROOT / "references/contracts/approved-template-image-envelope.schema.json"
+    ).read_text(encoding="utf-8"))
+    errors = sorted(
+        Draft202012Validator(envelope_schema, format_checker=FormatChecker()).iter_errors(envelope),
+        key=lambda error: list(error.path),
+    )
+    if errors:
+        raise ContractError("approved image envelope invalid: " + errors[0].message)
+    return envelope, receipt
 
 
 def write_production_index(
@@ -1336,6 +1563,174 @@ def _safe_batch_failure(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, ContractError):
         return exc.code, "current item failed a deterministic contract gate"
     return "UNEXPECTED_ITEM_FAILURE", "current item failed at an unexpected boundary"
+
+
+def plan_production_job(item_ids: Sequence[str], *, shard_size: int | None = None) -> dict[str, Any]:
+    """Plan one large production job into deterministic item-local execution shards."""
+
+    limits = _contract()["batch"]
+    size = limits["defaultShardSize"] if shard_size is None else shard_size
+    if not isinstance(item_ids, Sequence) or isinstance(item_ids, (str, bytes)):
+        raise ContractError("production job item IDs must be a sequence")
+    if not 1 <= len(item_ids) <= limits["maximumJobItems"]:
+        raise ContractError("production job size is outside the supported range")
+    if not isinstance(size, int) or not limits["minimumItems"] <= size <= limits["maximumItems"]:
+        raise ContractError("shard size must be between 1 and 100")
+    if any(not isinstance(item_id, str) or not item_id for item_id in item_ids):
+        raise ContractError("production job item IDs must be non-empty strings")
+    if len(set(item_ids)) != len(item_ids):
+        raise ContractError("production job item IDs must be unique")
+    job_sha = sha256_json({"itemIds": list(item_ids)})
+    shards = []
+    for index, start in enumerate(range(0, len(item_ids), size), 1):
+        members = list(item_ids[start:start + size])
+        shards.append({
+            "shardId": f"{job_sha[:12]}-{index:04d}",
+            "position": index,
+            "itemIds": members,
+            "itemCount": len(members),
+        })
+    return {
+        "jobSha256": job_sha,
+        "itemCount": len(item_ids),
+        "shardSize": size,
+        "shardCount": len(shards),
+        "shards": shards,
+    }
+
+
+def build_batch_strategy_chat_review(
+    packages: Sequence[Mapping[str, Any]], *, batch_id: str
+) -> dict[str, Any]:
+    """Build the compact replacement table shown at human approval point one."""
+
+    _non_empty_text(batch_id, "batchId")
+    rows = []
+    for package in packages:
+        if package.get("state") != "awaiting_strategy_approval":
+            raise ContractError("batch strategy review contains an ineligible item")
+        rows.append({
+            "itemId": package["itemId"],
+            "sourcePreview": package["sourcePreview"],
+            "replacementTarget": package["replacementTarget"],
+            "replacementValue": package["replacementValue"],
+            "riskCount": len(package["risks"]),
+            "objectSha256": package["objectSha256"],
+            "strategySha256": package["strategySha256"],
+            "promptSha256": package["promptSha256"],
+            "sourceImageSha256": package["sourceImageSha256"],
+            "inputUriSha256": package["inputUriSha256"],
+            "ruleVersion": package["ruleVersion"],
+            "revision": package["revision"],
+        })
+    if not rows or len(rows) > _contract()["batch"]["maximumItems"]:
+        raise ContractError("chat strategy review requires 1–100 items")
+    if len({row["itemId"] for row in rows}) != len(rows):
+        raise ContractError("chat strategy review item IDs must be unique")
+    return {
+        "state": "awaiting_strategy_approval",
+        "reviewSurface": "codex_chat",
+        "batchId": batch_id,
+        "itemCount": len(rows),
+        "rows": rows,
+        "manifestSha256": sha256_json({"batchId": batch_id, "rows": rows}),
+        "decisionMode": "approve_all_or_exclude_item_ids",
+    }
+
+
+def build_batch_image_chat_review(
+    packages: Sequence[Mapping[str, Any]], *, batch_id: str
+) -> dict[str, Any]:
+    """Build before/after thumbnail rows for human approval point two."""
+
+    _non_empty_text(batch_id, "batchId")
+    rows = []
+    for package in packages:
+        if package.get("state") != "awaiting_image_approval":
+            raise ContractError("batch image review contains an ineligible item")
+        rows.append({
+            "itemId": package["itemId"],
+            "beforeThumbnail": package["sourceImage"]["uri"],
+            "afterThumbnail": package["generatedImage"]["uri"],
+            "generatedImageSha256": package["generatedImage"]["sha256"],
+            "reviewPackageSha256": sha256_json(package),
+            "ruleVersion": package["ruleVersion"],
+            "revision": package["revision"],
+        })
+    if not rows or len(rows) > _contract()["batch"]["maximumItems"]:
+        raise ContractError("chat image review requires 1–100 items")
+    if len({row["itemId"] for row in rows}) != len(rows):
+        raise ContractError("chat image review item IDs must be unique")
+    return {
+        "state": "awaiting_image_approval",
+        "reviewSurface": "codex_chat",
+        "batchId": batch_id,
+        "itemCount": len(rows),
+        "rows": rows,
+        "manifestSha256": sha256_json({"batchId": batch_id, "rows": rows}),
+        "decisionMode": "approve_all_or_exclude_item_ids",
+    }
+
+
+def resolve_batch_chat_approval(
+    package: Mapping[str, Any],
+    *,
+    excluded_item_ids: Sequence[str],
+    reviewer_ref: str,
+    decided_at: str,
+) -> dict[str, Any]:
+    """Translate one chat reply into exact per-item approval records."""
+
+    if package.get("reviewSurface") != "codex_chat" or package.get("state") not in {
+        "awaiting_strategy_approval", "awaiting_image_approval"
+    }:
+        raise ContractError("batch chat package is not approvable")
+    _validate_human_facts({"reviewerRef": reviewer_ref, "decidedAt": decided_at})
+    rows = package.get("rows")
+    if not isinstance(rows, list) or package.get("manifestSha256") != sha256_json({
+        "batchId": package.get("batchId"), "rows": rows
+    }):
+        raise ContractError("batch chat package manifest is stale")
+    excluded = list(excluded_item_ids)
+    if len(set(excluded)) != len(excluded) or any(not isinstance(item_id, str) for item_id in excluded):
+        raise ContractError("excluded item IDs must be unique strings")
+    row_ids = {row["itemId"] for row in rows}
+    if not set(excluded) <= row_ids:
+        raise ContractError("excluded item IDs must belong to the reviewed batch")
+    approvals: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if row["itemId"] in excluded:
+            continue
+        common = {
+            "decision": "APPROVED",
+            "reviewerRef": reviewer_ref,
+            "decidedAt": decided_at,
+            "ruleVersion": row["ruleVersion"],
+            "revision": row["revision"],
+        }
+        if package["state"] == "awaiting_strategy_approval":
+            approvals[row["itemId"]] = {
+                **common,
+                **{name: row[name] for name in (
+                    "objectSha256", "strategySha256", "promptSha256",
+                    "sourceImageSha256", "inputUriSha256",
+                )},
+            }
+        else:
+            approvals[row["itemId"]] = {
+                **common,
+                "objectSha256": row["generatedImageSha256"],
+                "reviewPackageSha256": row["reviewPackageSha256"],
+            }
+    return {
+        "batchId": package["batchId"],
+        "manifestSha256": package["manifestSha256"],
+        "reviewerRef": reviewer_ref,
+        "decidedAt": decided_at,
+        "approvedItemIds": sorted(approvals),
+        "excludedItemIds": sorted(excluded),
+        "itemApprovals": approvals,
+    }
 
 
 def process_batch(

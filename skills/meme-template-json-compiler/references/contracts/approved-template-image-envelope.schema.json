@@ -1,18 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://contracts.memebuy.cn/approved-template-image-envelope-v1.schema.json",
+  "$id": "https://contracts.memebuy.cn/approved-template-image-envelope-v2.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "status", "image"],
   "properties": {
-    "schemaVersion": {"const": 1},
-    "status": {"const": "approved"},
+    "schemaVersion": {"const": 2},
+    "status": {"const": "approved_uploaded"},
     "image": {
       "type": "object",
       "additionalProperties": false,
       "required": ["uri", "sha256", "width", "height", "mime"],
       "properties": {
-        "uri": {"type": "string", "minLength": 1},
+        "uri": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://assets\\.memebuy\\.cn/gallery/template-images/[a-f0-9]{64}\\.png$"
+        },
         "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         "width": {"type": "integer", "minimum": 1},
         "height": {"type": "integer", "minimum": 1},

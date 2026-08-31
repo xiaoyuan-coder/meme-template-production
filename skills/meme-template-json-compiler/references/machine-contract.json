@@ -1,5 +1,5 @@
 {
-  "contractVersion": 1,
+  "contractVersion": 3,
   "keyPattern": "^[a-z][a-z0-9-]{1,59}$",
   "keyDecisions": [
     "NEW",
@@ -27,17 +27,10 @@
       "metadata", "cover", "referenceImage"
     ]
   },
-  "oss": {
-    "profile": "memebuy-production",
+  "imageAsset": {
     "baseUrl": "https://assets.memebuy.cn",
-    "objectKeyTemplate": "gallery/templates/{key}/{approvedImageSha256}.png",
-    "adapterFactory": "create_aliyun_oss_adapter_from_environment",
-    "environment": [
-      "OSS_ENDPOINT", "OSS_BUCKET_NAME", "OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_SECRET"
-    ],
-    "reconciliationFields": [
-      "objectKey", "sha256", "byteLength", "remoteIdentity", "requestIdentity"
-    ]
+    "pathPrefix": "/gallery/template-images/",
+    "source": "Approved Template Image envelope v2"
   },
   "authoring": {
     "titleMaxLength": 20,
@@ -76,10 +69,19 @@
       "review": "ambiguous"
     },
     "textRoles": ["identity", "content", "attribution", "watermark", "brand", "ambiguous"],
+    "textSemanticUnitRoles": [
+      "independent_message", "distributed_message", "supporting_copy",
+      "fixed_context", "noise", "ambiguous"
+    ],
     "tagCategories": ["mechanism", "subject", "scene", "medium", "emotion", "use_case", "text", "relation"],
-    "singleSlotAxes": [
+    "slotDecisionAxes": [
       "subject", "text", "object", "clothing", "color", "prop", "scene", "nested_content"
     ],
+    "slotCountPreference": {
+      "minimum": 2,
+      "maximum": 4,
+      "singleSlotRequiresCoverageReview": true
+    },
     "allowedSlotSelectionReasons": [
       "identity_control", "template_hook", "high_value_text", "exact_content_asset"
     ],
@@ -103,7 +105,8 @@
       "sourceOptions": ["upload", "recent_upload", "asset_library"]
     },
     "selfReviewChecks": [
-      "templateValueFocused", "slotScopeMinimal", "imageModesJustified",
+      "templateValueFocused", "playHypothesisGrounded", "slotRecallComplete",
+      "slotPrecisionComplete", "semanticUnitsCoherent", "slotScopeMinimal", "imageModesJustified",
       "groupPolicyJustified", "featureAuthorityComplete", "textRoutingComplete",
       "textEditLayersComplete", "titlePortable",
       "copyUserFacingAndSearchable",
@@ -112,5 +115,5 @@
     ],
     "semanticCompiler": "compile_semantics_from_analysis"
   },
-  "batch": {"minimumItems": 1, "maximumItems": 100}
+  "batch": {"minimumItems": 1, "maximumItems": 100, "maximumJobItems": 5000}
 }

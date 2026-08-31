@@ -1,17 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://contracts.memebuy.cn/approved-image-analysis-v2.schema.json",
+  "$id": "https://contracts.memebuy.cn/approved-image-analysis-v3.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schemaVersion", "approvedImageSha256", "visualMechanism", "templateValue", "componentGraph",
+    "schemaVersion", "approvedImageSha256", "visualMechanism", "templateValue", "playDecisionModel", "componentGraph",
     "identityTopology", "textRegions", "mediumComposition", "spatialRelations",
-    "containers", "fixedStructure", "editableCandidates", "counts", "fieldEvidence",
+    "containers", "fixedStructure", "editableCandidates", "slotCoverageReview", "counts", "fieldEvidence",
     "titleEvidence", "descriptionEvidence", "tagEvidence", "slotEvidence", "promptCoverage",
     "translationEquivalences", "semanticModel", "selfReview", "warnings"
   ],
   "properties": {
-    "schemaVersion": {"const": 2},
+    "schemaVersion": {"const": 3},
     "approvedImageSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "visualMechanism": {"type": "string", "minLength": 1},
     "templateValue": {
@@ -23,6 +23,30 @@
         "templateHook": {"type": "string", "minLength": 1},
         "fixedMechanism": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
         "backendOnlyFacts": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "playDecisionModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["funProposition", "userRecreationWish", "coreUserDecisions"],
+      "properties": {
+        "funProposition": {"type": "string", "minLength": 1},
+        "userRecreationWish": {"type": "string", "minLength": 1},
+        "coreUserDecisions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["decisionId", "description", "slotId", "evidence"],
+            "properties": {
+              "decisionId": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+              "description": {"type": "string", "minLength": 1},
+              "slotId": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+              "evidence": {"type": "string", "minLength": 1}
+            }
+          }
+        }
       }
     },
     "componentGraph": {"type": "array", "minItems": 1, "items": {"type": "object"}},
@@ -43,6 +67,7 @@
     "containers": {"type": "array", "items": {"type": "object"}},
     "fixedStructure": {"type": "array", "minItems": 1},
     "editableCandidates": {"type": "array", "items": {"type": "object"}},
+    "slotCoverageReview": {"type": "object"},
     "counts": {
       "type": "object",
       "additionalProperties": false,
@@ -60,7 +85,6 @@
     "tagEvidence": {"type": "object"},
     "slotEvidence": {"type": "object"},
     "promptCoverage": {"type": "object"},
-    "singleSlotExhaustion": {"type": "object"},
     "translationEquivalences": {"type": "array", "items": {"type": "object"}},
     "semanticModel": {"type": "object"},
     "selfReview": {

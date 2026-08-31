@@ -16,23 +16,6 @@ compiler = load_module(
     "json_compiler",
     "skills/meme-template-json-compiler/scripts/compiler.py",
 )
-UPLOADED_AT = "2026-08-29T12:00:00Z"
-
-
-class FakeOss:
-    def __init__(self, existing=None):
-        self.existing = existing
-        self.head_calls = []
-        self.put_calls = []
-
-    def head(self, object_key):
-        self.head_calls.append(object_key)
-        return self.existing
-
-    def put_create_once(self, object_key, content, metadata):
-        self.put_calls.append((object_key, content, dict(metadata)))
-        self.existing = {"objectKey": object_key, **metadata}
-        return dict(self.existing)
 
 
 def source(asset_id="asset-1", digest=None):
@@ -42,17 +25,18 @@ def source(asset_id="asset-1", digest=None):
     return value
 
 
-def valid_approval(draft, png_bytes=PNG_BYTES, rule_version="0.1.0", revision=1):
+def valid_image_envelope(png_bytes=PNG_BYTES):
     image_sha = hashlib.sha256(png_bytes).hexdigest()
-    formal = compiler.project_formal_json(draft, image_sha)
     return {
-        "decision": "APPROVED",
-        "objectSha256": compiler.sha256_json(formal),
-        "approvedImageSha256": image_sha,
-        "reviewerRef": "reviewer://json/test",
-        "decidedAt": "2026-08-29T11:00:00Z",
-        "ruleVersion": rule_version,
-        "revision": revision,
+        "schemaVersion": 2,
+        "status": "approved_uploaded",
+        "image": {
+            "uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png",
+            "sha256": image_sha,
+            "width": 1024,
+            "height": 1024,
+            "mime": "image/png",
+        },
     }
 
 
@@ -138,14 +122,14 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual([result["state"] for result in results], ["paused", "completed"])
 
 
-class GalleryAndOssTests(unittest.TestCase):
-    def test_json_review_binds_complete_preview_and_approved_image_sha(self):
+class GalleryAndCompilationTests(unittest.TestCase):
+    def test_compile_final_json_reuses_upstream_immutable_url(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1,
-            "status": "approved",
+            "schemaVersion": 2,
+            "status": "approved_uploaded",
             "image": {
-                "uri": "fixture://approved.png",
+                "uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png",
                 "sha256": image_sha,
                 "width": 1024,
                 "height": 1024,
@@ -159,48 +143,37 @@ class GalleryAndOssTests(unittest.TestCase):
             "matchedBy": [],
             "evidence": [],
         }
-        package = compiler.build_json_review_package(
+        formal = compiler.compile_final_json(
             envelope,
             valid_approved_analysis(image_sha),
             valid_formal_draft(),
             registry,
-            rule_version="0.1.0",
-            revision=1,
         )
-        self.assertEqual(package["approvedImageSha256"], image_sha)
-        self.assertEqual(package["assetState"]["status"], "planned_not_uploaded")
-        self.assertEqual(package["assetState"]["previewUri"], envelope["image"]["uri"])
-        self.assertEqual(package["assetState"]["plannedImmutableUrl"], package["formalPreview"]["cover"])
-        self.assertEqual(package["objectSha256"], compiler.sha256_json(package["formalPreview"]))
-        self.assertEqual(package["formalPreview"]["cover"], package["formalPreview"]["referenceImage"])
+        self.assertEqual(formal["cover"], envelope["image"]["uri"])
+        self.assertEqual(formal["referenceImage"], envelope["image"]["uri"])
         analysis_schema = json.loads((
             ROOT / "skills/meme-template-json-compiler/references/contracts/approved-image-analysis.schema.json"
         ).read_text(encoding="utf-8"))
-        review_schema = json.loads((
-            ROOT / "skills/meme-template-json-compiler/references/contracts/template-json-review.schema.json"
-        ).read_text(encoding="utf-8"))
         Draft202012Validator(analysis_schema).validate(valid_approved_analysis(image_sha))
-        Draft202012Validator(review_schema).validate(package)
 
-    def test_malformed_registry_response_cannot_reach_review(self):
+    def test_malformed_registry_response_cannot_reach_delivery(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         malformed = {"decision": "NEW", "resolvedKey": "hug-your-pet"}
         with self.assertRaises(compiler.ContractError):
-            compiler.build_json_review_package(
-                envelope, valid_approved_analysis(image_sha), valid_formal_draft(), malformed,
-                rule_version="0.1.0", revision=1,
+            compiler.compile_final_json(
+                envelope, valid_approved_analysis(image_sha), valid_formal_draft(), malformed
             )
 
     def test_independent_analysis_covers_every_formal_field(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         analysis = valid_approved_analysis(image_sha)
@@ -213,8 +186,8 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_title_description_tags_slots_and_prompt_are_machine_gated(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         analysis = valid_approved_analysis(image_sha)
@@ -242,8 +215,8 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_prompt_requires_real_placeholders_and_matching_defaults(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         for prompt in (
@@ -262,8 +235,8 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_user_facing_copy_and_retrieval_tags_are_machine_gated(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         draft = valid_formal_draft()
@@ -288,8 +261,8 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_recognized_ip_identity_uses_specific_natural_default(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         draft = valid_formal_draft()
@@ -333,11 +306,102 @@ class GalleryAndOssTests(unittest.TestCase):
         with self.assertRaises(compiler.ContractError):
             compiler.validate_authoring_contract(overdescribed, draft, envelope)
 
+    def test_slot_count_preference_is_two_to_four_and_caps_at_four(self):
+        contract = json.loads((
+            ROOT / "skills/meme-template-json-compiler/references/machine-contract.json"
+        ).read_text(encoding="utf-8"))
+        preference = contract["authoring"]["slotCountPreference"]
+        self.assertEqual(preference, {
+            "minimum": 2,
+            "maximum": 4,
+            "singleSlotRequiresCoverageReview": True,
+        })
+
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        draft = valid_formal_draft()
+        analysis = valid_approved_analysis(image_sha)
+        compiler.validate_authoring_contract(analysis, draft, envelope)
+
+        oversized = copy.deepcopy(draft)
+        for index in range(4):
+            oversized["inputSchema"]["slots"].append({"id": f"extra_{index}"})
+        with self.assertRaisesRegex(compiler.ContractError, "at most four"):
+            compiler.validate_authoring_contract(analysis, oversized, envelope)
+
+    def test_play_decisions_slot_coverage_and_precision_are_machine_gated(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        draft = valid_formal_draft()
+        analysis = valid_approved_analysis(image_sha)
+        compiler.validate_authoring_contract(analysis, draft, envelope)
+
+        wrong_decision = copy.deepcopy(analysis)
+        wrong_decision["playDecisionModel"]["coreUserDecisions"][0]["slotId"] = "headline"
+        with self.assertRaisesRegex(compiler.ContractError, "one-to-one"):
+            compiler.validate_authoring_contract(wrong_decision, draft, envelope)
+
+        low_precision = copy.deepcopy(analysis)
+        low_precision["slotEvidence"]["subject"]["independentUserChoice"] = False
+        with self.assertRaisesRegex(compiler.ContractError, "high-value gate"):
+            compiler.validate_authoring_contract(low_precision, draft, envelope)
+
+        missed_candidate = copy.deepcopy(analysis)
+        missed_candidate["slotCoverageReview"]["axes"]["subject"]["candidateComponentIds"] = []
+        with self.assertRaisesRegex(compiler.ContractError, "omitted"):
+            compiler.validate_authoring_contract(missed_candidate, draft, envelope)
+
+    def test_distributed_text_regions_share_one_semantic_unit_and_slot(self):
+        regions = [
+            {
+                "regionId": "comparison-top", "role": "content", "action": "open_slot",
+                "semanticUnitId": "comparison-joke", "semanticUnitRole": "distributed_message",
+                "editValue": "high", "routingEvidence": "对比句上半部分",
+                "slotId": "comparison_copy", "language": "en", "exactText": "The more I know",
+                "layout": "one line", "position": "top",
+            },
+            {
+                "regionId": "comparison-bottom", "role": "content", "action": "open_slot",
+                "semanticUnitId": "comparison-joke", "semanticUnitRole": "distributed_message",
+                "editValue": "high", "routingEvidence": "对比句下半部分",
+                "slotId": "comparison_copy", "language": "en",
+                "exactText": "The more I love my cat", "layout": "one line", "position": "bottom",
+            },
+        ]
+        compiler._validate_text_regions(regions)
+        split = copy.deepcopy(regions)
+        split[1]["slotId"] = "people_word"
+        with self.assertRaisesRegex(compiler.ContractError, "one route, slot, and role"):
+            compiler._validate_text_regions(split)
+
+    def test_batch_identity_diversity_routes_repeated_ip_to_exception_review(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        first = valid_approved_analysis(image_sha)
+        second = valid_approved_analysis(image_sha)
+        for analysis in (first, second):
+            recognition = analysis["slotEvidence"]["subject"]["identityRecognition"]
+            recognition.update({"status": "recognized", "canonicalName": "初音未来"})
+            analysis["slotEvidence"]["subject"]["defaultValue"] = "初音未来"
+        report = compiler.build_batch_identity_diversity_report([
+            {"itemId": "anime-a", "analysis": first},
+            {"itemId": "anime-b", "analysis": second},
+        ])
+        self.assertEqual(report["qualitySignal"], "identity_concentration")
+        self.assertEqual(report["repeatedIdentities"][0]["canonicalName"], "初音未来")
+
     def test_suggestions_keep_the_default_language_and_copy_form(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         draft = valid_formal_draft()
@@ -364,8 +428,8 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_official_major_tag_and_frozen_image_profile_are_required(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         no_major = valid_formal_draft()
@@ -386,8 +450,8 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_supporting_detail_and_open_values_are_semantically_gated(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         supporting = valid_approved_analysis(image_sha)
@@ -406,13 +470,14 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_text_slot_routing_and_self_review_sha_cannot_be_stale(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         unrouted = valid_approved_analysis(image_sha)
         unrouted["textRegions"] = [{
             "regionId": "left-label", "role": "content", "action": "open_slot",
+            "semanticUnitId": "left-label-message", "semanticUnitRole": "independent_message",
             "editValue": "high", "routingEvidence": "关系标签是高价值文字",
             "slotId": "missing_label", "language": "ko", "exactText": "왼쪽",
             "layout": "单行箭头标签", "position": "左侧人物上方",
@@ -429,8 +494,8 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_distinct_arrow_labels_compile_as_independent_text_slots(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         draft = valid_formal_draft()
@@ -466,7 +531,6 @@ class GalleryAndOssTests(unittest.TestCase):
         )
 
         analysis = valid_approved_analysis(image_sha)
-        analysis.pop("singleSlotExhaustion")
         analysis["counts"]["inputControlCount"] = 3
         analysis["textRegions"] = []
         for slot_id, (label, default, suggestions) in labels.items():
@@ -480,13 +544,17 @@ class GalleryAndOssTests(unittest.TestCase):
             })
             analysis["textRegions"].append({
                 "regionId": target_id, "role": "content", "action": "open_slot",
+                "semanticUnitId": f"{slot_id}_message",
+                "semanticUnitRole": "independent_message",
                 "editValue": "high", "routingEvidence": "箭头关系标签是高价值文字",
                 "slotId": slot_id, "language": "zh-CN", "exactText": default,
                 "layout": "单行箭头标签", "position": label,
             })
             analysis["slotEvidence"][slot_id] = {
-                "userMotivation": True, "visuallyVisible": True,
+                "userMotivation": True, "independentUserChoice": True,
+                "meaningfulVariation": True, "visuallyVisible": True,
                 "modelControllable": True, "mechanismPreserved": True,
+                "decisionId": f"choose_{slot_id}",
                 "selectionReason": "high_value_text", "defaultValue": default,
                 "semanticAxis": f"{label}内容", "granularity": "人物关系短标签",
                 "defaultLanguageReview": {
@@ -508,6 +576,15 @@ class GalleryAndOssTests(unittest.TestCase):
                 "targetIds": [target_id], "visualContractFields": ["relations"],
             }
             analysis["semanticModel"]["dynamicFactSources"][slot_id] = f"inputSchema.slots.{slot_id}"
+            analysis["playDecisionModel"]["coreUserDecisions"].append({
+                "decisionId": f"choose_{slot_id}",
+                "description": f"选择{label}的关系文字",
+                "slotId": slot_id,
+                "evidence": f"{label}独立指向一名人物",
+            })
+            analysis["slotCoverageReview"]["axes"]["text"]["candidateComponentIds"].append(target_id)
+            analysis["slotCoverageReview"]["axes"]["text"]["selectedSlotIds"].append(slot_id)
+        analysis["slotCoverageReview"]["selectedSlotIds"] = ["subject", *labels]
         analysis["promptCoverage"]["slotIds"] = ["subject", *labels]
         analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
         analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(draft["runtimeSemantics"])
@@ -518,8 +595,8 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_dynamic_identity_group_requires_all_five_decisions(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         draft = valid_formal_draft()
@@ -553,6 +630,7 @@ class GalleryAndOssTests(unittest.TestCase):
                 "selectionReason": "identity_control", "exclusionReason": None,
             }
         ]
+        analysis["slotCoverageReview"]["axes"]["subject"]["candidateComponentIds"] = ["subject_group"]
         analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
         analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(draft["runtimeSemantics"])
         analysis["semanticModel"]["componentCoverage"] = {
@@ -612,13 +690,14 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_open_subject_rejects_preserved_specific_identity_text(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         analysis = valid_approved_analysis(image_sha)
         analysis["textRegions"] = [{
             "regionId": "identity-name", "role": "identity", "action": "preserve",
+            "semanticUnitId": "identity-name", "semanticUnitRole": "fixed_context",
             "editValue": "fixed", "routingEvidence": "测试错误保留开放身份名",
             "language": "zh-CN", "exactText": "具体艺人名", "layout": "单行",
             "position": "左上角",
@@ -629,8 +708,8 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_feature_authority_and_three_text_edit_layers_are_machine_gated(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
-            "schemaVersion": 1, "status": "approved",
-            "image": {"uri": "fixture://approved.png", "sha256": image_sha,
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         draft = valid_formal_draft()
@@ -642,6 +721,7 @@ class GalleryAndOssTests(unittest.TestCase):
         analysis["textRegions"] = [
             {
                 "regionId": "secondary-caption", "role": "content",
+                "semanticUnitId": "secondary-caption", "semanticUnitRole": "supporting_copy",
                 "action": "free_editable", "editValue": "secondary",
                 "routingEvidence": "用户可能修改，但不需要占用快捷槽位",
                 "language": "zh-CN", "exactText": "今日也要开心",
@@ -649,6 +729,7 @@ class GalleryAndOssTests(unittest.TestCase):
             },
             {
                 "regionId": "shop-sign", "role": "content",
+                "semanticUnitId": "shop-sign", "semanticUnitRole": "fixed_context",
                 "action": "preserve", "editValue": "fixed",
                 "routingEvidence": "招牌文字是环境语境和版式的固定组成",
                 "language": "zh-CN", "exactText": "营业中",
@@ -656,6 +737,7 @@ class GalleryAndOssTests(unittest.TestCase):
             },
             {
                 "regionId": "author-mark", "role": "watermark",
+                "semanticUnitId": "author-mark", "semanticUnitRole": "noise",
                 "action": "remove", "editValue": "none",
                 "routingEvidence": "作者水印不属于模板内容",
                 "language": "zh-CN", "exactText": "@原作者",
@@ -707,7 +789,7 @@ class GalleryAndOssTests(unittest.TestCase):
     def test_gallery_snapshot_and_v2_profile(self):
         draft = valid_formal_draft()
         digest = hashlib.sha256(PNG_BYTES).hexdigest()
-        url = f"https://assets.memebuy.cn/gallery/templates/hug-your-pet/{digest}.png"
+        url = f"https://assets.memebuy.cn/gallery/template-images/{digest}.png"
         formal = {**draft, "cover": url, "referenceImage": url}
         compiler.validate_formal_json(formal)
         backend_export = copy.deepcopy(formal)
@@ -725,10 +807,10 @@ class GalleryAndOssTests(unittest.TestCase):
 
     def test_approved_envelope_rejects_semantic_pollution(self):
         envelope = {
-            "schemaVersion": 1,
-            "status": "approved",
+            "schemaVersion": 2,
+            "status": "approved_uploaded",
             "image": {
-                "uri": "fixture://approved.png",
+                "uri": f"https://assets.memebuy.cn/gallery/template-images/{'a' * 64}.png",
                 "sha256": "a" * 64,
                 "width": 1024,
                 "height": 1024,
@@ -739,142 +821,18 @@ class GalleryAndOssTests(unittest.TestCase):
         with self.assertRaises(compiler.ContractError):
             compiler.validate_approved_image_envelope(envelope)
 
-    def test_oss_path_url_hash_and_same_cover_reference(self):
-        draft = valid_formal_draft()
-        approval = valid_approval(draft)
-        oss = FakeOss()
-        formal, receipt = compiler.finalize_approved_json(
-            draft, approval, PNG_BYTES, oss, rule_version="0.1.0", revision=1,
-            uploaded_at=UPLOADED_AT,
-        )
-        digest = hashlib.sha256(PNG_BYTES).hexdigest()
-        expected_key = f"gallery/templates/hug-your-pet/{digest}.png"
-        expected_url = f"https://assets.memebuy.cn/{expected_key}"
-        self.assertEqual(receipt["objectKey"], expected_key)
-        self.assertEqual(receipt["objectDigest"], digest)
-        self.assertEqual(receipt["providerReceiptDigest"], compiler.sha256_json(receipt["providerReceipt"]))
-        self.assertEqual(receipt["uploadedAt"], UPLOADED_AT)
-        self.assertEqual(oss.put_calls[0][0], expected_key)
-        self.assertIs(oss.put_calls[0][1], PNG_BYTES)
-        self.assertEqual(formal["cover"], expected_url)
-        self.assertEqual(formal["referenceImage"], expected_url)
-
-    def test_stale_json_approval_has_zero_oss_calls(self):
-        oss = FakeOss()
-        with self.assertRaises(compiler.ContractError):
-            compiler.finalize_approved_json(
-                valid_formal_draft(),
-                {"decision": "APPROVED", "objectSha256": "0" * 64, "approvedImageSha256": "0" * 64},
-                PNG_BYTES,
-                oss, rule_version="0.1.0", revision=1, uploaded_at=UPLOADED_AT,
-            )
-        self.assertEqual(oss.head_calls, [])
-        self.assertEqual(oss.put_calls, [])
-
-    def test_invalid_production_profile_has_zero_oss_calls(self):
-        draft = valid_formal_draft()
-        draft["runtimeSemantics"]["version"] = 1
-        approval = valid_approval(draft)
-        oss = FakeOss()
-        with self.assertRaises(compiler.ContractError):
-            compiler.finalize_approved_json(
-                draft, approval, PNG_BYTES, oss, rule_version="0.1.0", revision=1,
-                uploaded_at=UPLOADED_AT,
-            )
-        self.assertEqual(oss.head_calls, [])
-        self.assertEqual(oss.put_calls, [])
-
-    def test_json_approval_cannot_be_reused_for_different_png(self):
-        draft = valid_formal_draft()
-        approval = valid_approval(draft)
-        changed_png = PNG_BYTES + b"changed"
-        oss = FakeOss()
-        with self.assertRaises(compiler.ContractError):
-            compiler.finalize_approved_json(
-                draft, approval, changed_png, oss, rule_version="0.1.0", revision=1,
-                uploaded_at=UPLOADED_AT,
-            )
-        self.assertEqual(oss.head_calls, [])
-        self.assertEqual(oss.put_calls, [])
-
-    def test_remote_object_reuse_requires_all_three_identity_facts(self):
-        draft = valid_formal_draft()
-        approval = valid_approval(draft)
-        intent = compiler.oss_intent(draft["key"], PNG_BYTES)
-        matching = {
-            "objectKey": intent["objectKey"],
-            "sha256": intent["approvedImageSha256"],
-            "byteLength": intent["byteLength"],
-            "remoteIdentity": intent["remoteIdentity"],
-            "requestIdentity": intent["requestIdentity"],
-        }
-        oss = FakeOss(matching)
-        _, receipt = compiler.finalize_approved_json(
-            draft, approval, PNG_BYTES, oss, rule_version="0.1.0", revision=1,
-            uploaded_at=UPLOADED_AT,
-        )
-        self.assertTrue(receipt["providerReceipt"]["reused"])
-        self.assertEqual(oss.put_calls, [])
-
-        for field, bad_value in (
-            ("objectKey", "other"), ("sha256", "0" * 64), ("byteLength", 1),
-            ("remoteIdentity", "other"), ("requestIdentity", "0" * 64),
-        ):
-            with self.subTest(field=field):
-                conflict = dict(matching)
-                conflict[field] = bad_value
-                bad_oss = FakeOss(conflict)
-                with self.assertRaises(compiler.ContractError):
-                    compiler.finalize_approved_json(
-                        draft, approval, PNG_BYTES, bad_oss, rule_version="0.1.0", revision=1,
-                        uploaded_at=UPLOADED_AT,
-                    )
-                self.assertEqual(bad_oss.put_calls, [])
-
-    def test_json_approval_rule_and_revision_are_fresh_before_oss(self):
-        draft = valid_formal_draft()
-        for changed in ({"ruleVersion": "0.2.0"}, {"revision": 2}):
-            approval = valid_approval(draft)
-            approval.update(changed)
-            oss = FakeOss()
-            with self.assertRaises(compiler.ContractError):
-                compiler.finalize_approved_json(
-                    draft, approval, PNG_BYTES, oss, rule_version="0.1.0", revision=1,
-                    uploaded_at=UPLOADED_AT,
-                )
-            self.assertEqual(oss.head_calls, [])
-
-    def test_receipt_recovery_skips_remote_calls(self):
-        draft = valid_formal_draft()
-        approval = valid_approval(draft)
-        first_oss = FakeOss()
-        formal, receipt = compiler.finalize_approved_json(
-            draft, approval, PNG_BYTES, first_oss, rule_version="0.1.0", revision=1,
-            uploaded_at=UPLOADED_AT,
-        )
-        recovering_oss = FakeOss()
-        recovered, recovered_receipt = compiler.finalize_approved_json(
-            draft, approval, PNG_BYTES, recovering_oss,
-            rule_version="0.1.0", revision=1, uploaded_at=UPLOADED_AT,
-            existing_receipt=receipt,
-        )
-        self.assertEqual(recovered, formal)
-        self.assertEqual(recovered_receipt, receipt)
-        self.assertEqual(recovering_oss.head_calls, [])
-        self.assertEqual(recovering_oss.put_calls, [])
-        tampered = copy.deepcopy(receipt)
-        tampered["providerReceiptDigest"] = "0" * 64
-        with self.assertRaises(compiler.ContractError):
-            compiler.finalize_approved_json(
-                draft, approval, PNG_BYTES, recovering_oss,
-                rule_version="0.1.0", revision=1, uploaded_at=UPLOADED_AT,
-                existing_receipt=tampered,
-            )
-        self.assertEqual(recovering_oss.head_calls, [])
+    def test_json_only_revision_reuses_the_same_image_url(self):
+        envelope = valid_image_envelope()
+        first = compiler.project_formal_json(valid_formal_draft(), envelope)
+        revised_draft = valid_formal_draft()
+        revised_draft["title"] = "抱紧你的毛孩子"
+        revised = compiler.project_formal_json(revised_draft, envelope)
+        self.assertEqual(first["cover"], revised["cover"])
+        self.assertEqual(first["referenceImage"], revised["referenceImage"])
 
     def test_formal_writer_is_create_once_and_path_safe(self):
         draft = valid_formal_draft()
-        formal = compiler.project_formal_json(draft, hashlib.sha256(PNG_BYTES).hexdigest())
+        formal = compiler.project_formal_json(draft, valid_image_envelope())
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = compiler.write_formal_json(root, formal)
@@ -893,7 +851,7 @@ class GalleryAndOssTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             formal = compiler.project_formal_json(
-                valid_formal_draft(), hashlib.sha256(PNG_BYTES).hexdigest()
+                valid_formal_draft(), valid_image_envelope()
             )
             compiler.write_formal_json(root / "delivery", formal)
             index_path = compiler.write_production_index(

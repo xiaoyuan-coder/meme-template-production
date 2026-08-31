@@ -1,21 +1,24 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://contracts.memebuy.cn/oss-receipt-v1.schema.json",
+  "$id": "https://contracts.memebuy.cn/template-image-oss-receipt-v2.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "key", "approvedImageSha256", "objectDigest", "byteLength", "objectKey",
-    "remoteIdentity", "requestIdentity", "publicHttpsUrl", "providerReceipt", "providerReceiptDigest", "uploadedAt"
+    "approvedImageSha256", "objectDigest", "byteLength", "objectKey",
+    "remoteIdentity", "requestIdentity", "publicHttpsUrl", "providerReceipt",
+    "providerReceiptDigest", "uploadedAt"
   ],
   "properties": {
-    "key": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,59}$"},
     "approvedImageSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "objectDigest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "byteLength": {"type": "integer", "minimum": 1},
-    "objectKey": {"type": "string", "pattern": "^gallery/templates/[a-z][a-z0-9-]{1,59}/[a-f0-9]{64}\\.png$"},
+    "objectKey": {"type": "string", "pattern": "^gallery/template-images/[a-f0-9]{64}\\.png$"},
     "remoteIdentity": {"type": "string", "minLength": 1},
     "requestIdentity": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-    "publicHttpsUrl": {"type": "string", "format": "uri", "pattern": "^https://assets\\.memebuy\\.cn/gallery/templates/"},
+    "publicHttpsUrl": {
+      "type": "string", "format": "uri",
+      "pattern": "^https://assets\\.memebuy\\.cn/gallery/template-images/[a-f0-9]{64}\\.png$"
+    },
     "providerReceipt": {"type": "object"},
     "providerReceiptDigest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "uploadedAt": {"type": "string", "format": "date-time"}

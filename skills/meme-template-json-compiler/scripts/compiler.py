@@ -1,14 +1,12 @@
-"""Deterministic Gallery v2, key-registry, and OSS finalization gates."""
+"""Deterministic Gallery v2 compilation and key-registry gates."""
 
 from __future__ import annotations
 
 import hashlib
-import importlib
 import json
 import os
 import re
 import tempfile
-from datetime import datetime
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
@@ -40,14 +38,6 @@ class ExternalAdapterError(ContractError):
 
 class KeyRegistryReader(Protocol):
     def resolveTemplateKey(self, request: Mapping[str, Any]) -> Mapping[str, Any]: ...
-
-
-class OssAdapter(Protocol):
-    def head(self, object_key: str) -> Mapping[str, Any] | None: ...
-
-    def put_create_once(
-        self, object_key: str, content: bytes, metadata: Mapping[str, Any]
-    ) -> Mapping[str, Any]: ...
 
 
 class JsonHttpTransport(Protocol):
@@ -89,87 +79,6 @@ class MemeAdminKeyRegistryClient:
             raise ExternalAdapterError("key-registry request failed") from None
         _validate_registry_response(response)
         return deepcopy(dict(response))
-
-
-class AliyunOssAdapter:
-    """Create-once OSS adapter with SHA metadata and redacted provider responses."""
-
-    def __init__(self, bucket: Any) -> None:
-        self._bucket = bucket
-
-    @staticmethod
-    def _header(headers: Mapping[str, Any], name: str) -> Any:
-        return headers.get(name) or headers.get(name.lower()) or headers.get(name.title())
-
-    def head(self, object_key: str) -> Mapping[str, Any] | None:
-        try:
-            # `get_object_meta` may omit user-defined x-oss-meta-* headers on
-            # otherwise healthy objects. `head_object` returns the complete
-            # response headers required for create-once reconciliation.
-            result = self._bucket.head_object(object_key)
-        except Exception as exc:
-            status = getattr(exc, "status", None)
-            if status == 404:
-                return None
-            raise ExternalAdapterError("OSS metadata lookup failed") from None
-        headers = getattr(result, "headers", {}) or {}
-        return {
-            "objectKey": object_key,
-            "sha256": self._header(headers, "x-oss-meta-sha256"),
-            "byteLength": int(self._header(headers, "x-oss-meta-byte-length") or 0),
-            "remoteIdentity": self._header(headers, "x-oss-meta-remote-identity"),
-            "requestIdentity": self._header(headers, "x-oss-meta-request-identity"),
-        }
-
-    def put_create_once(
-        self, object_key: str, content: bytes, metadata: Mapping[str, Any]
-    ) -> Mapping[str, Any]:
-        headers = {
-            "x-oss-forbid-overwrite": "true",
-            "Content-Type": "image/png",
-            "x-oss-meta-sha256": str(metadata["sha256"]),
-            "x-oss-meta-byte-length": str(metadata["byteLength"]),
-            "x-oss-meta-remote-identity": str(metadata["remoteIdentity"]),
-            "x-oss-meta-request-identity": str(metadata["requestIdentity"]),
-        }
-        try:
-            result = self._bucket.put_object(object_key, content, headers=headers)
-        except Exception:
-            raise ExternalAdapterError("OSS create-once upload failed") from None
-        response = {
-            "objectKey": object_key,
-            "sha256": metadata["sha256"],
-            "byteLength": metadata["byteLength"],
-            "remoteIdentity": metadata["remoteIdentity"],
-            "requestIdentity": metadata["requestIdentity"],
-        }
-        request_id = getattr(result, "request_id", None)
-        if isinstance(request_id, str) and request_id:
-            response["providerRequestId"] = request_id
-        return response
-
-
-def create_aliyun_oss_adapter_from_environment(
-    environ: Mapping[str, str] | None = None,
-    *,
-    module_loader: Callable[[str], Any] = importlib.import_module,
-) -> AliyunOssAdapter:
-    env = os.environ if environ is None else environ
-    names = (
-        "OSS_ENDPOINT", "OSS_BUCKET_NAME", "OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_SECRET"
-    )
-    if any(not isinstance(env.get(name), str) or not env[name].strip() for name in names):
-        raise AdapterConfigurationError("OSS credentials or target configuration are unavailable")
-    try:
-        oss2 = module_loader("oss2")
-    except (ImportError, ModuleNotFoundError):
-        raise AdapterConfigurationError("aliyun-oss2 dependency is unavailable") from None
-    try:
-        auth = oss2.Auth(env["OSS_ACCESS_KEY_ID"], env["OSS_ACCESS_KEY_SECRET"])
-        bucket = oss2.Bucket(auth, env["OSS_ENDPOINT"], env["OSS_BUCKET_NAME"])
-    except Exception:
-        raise AdapterConfigurationError("OSS adapter initialization failed") from None
-    return AliyunOssAdapter(bucket)
 
 
 _SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -357,6 +266,12 @@ def validate_approved_image_envelope(envelope: Mapping[str, Any]) -> None:
     errors = sorted(Draft202012Validator(schema).iter_errors(envelope), key=lambda e: list(e.path))
     if errors:
         raise ContractError("approved image envelope invalid: " + errors[0].message)
+    image = envelope["image"]
+    if image["uri"] != (
+        f"{_contract()['imageAsset']['baseUrl']}"
+        f"{_contract()['imageAsset']['pathPrefix']}{image['sha256']}.png"
+    ):
+        raise ContractError("approved image URI and SHA-256 identity differ")
 
 
 def _non_empty_text(value: Any, field: str) -> str:
@@ -419,21 +334,21 @@ def validate_approved_image_analysis(
     validate_approved_image_envelope(approved_image)
     required = {
         "schemaVersion", "approvedImageSha256", "visualMechanism", "componentGraph",
-        "templateValue",
+        "templateValue", "playDecisionModel",
         "identityTopology", "textRegions", "mediumComposition", "spatialRelations",
-        "containers", "fixedStructure", "editableCandidates", "counts", "fieldEvidence",
+        "containers", "fixedStructure", "editableCandidates", "slotCoverageReview", "counts", "fieldEvidence",
         "titleEvidence", "descriptionEvidence", "tagEvidence", "slotEvidence", "promptCoverage",
         "translationEquivalences", "semanticModel", "selfReview",
         "warnings",
     }
-    allowed = required | {"singleSlotExhaustion"}
+    allowed = required
     if not required.issubset(analysis) or not set(analysis).issubset(allowed):
         raise ContractError(
             f"approved image analysis fields mismatch; missing={sorted(required - analysis.keys())}, "
             f"extra={sorted(analysis.keys() - allowed)}"
         )
-    if analysis["schemaVersion"] != 2:
-        raise ContractError("approved image analysis schemaVersion must be 2")
+    if analysis["schemaVersion"] != 3:
+        raise ContractError("approved image analysis schemaVersion must be 3")
     if analysis["approvedImageSha256"] != approved_image["image"]["sha256"]:
         raise ContractError("approved image analysis belongs to another image")
     _non_empty_text(analysis["visualMechanism"], "visualMechanism")
@@ -449,6 +364,27 @@ def validate_approved_image_analysis(
             isinstance(item, str) and item.strip() for item in template_value[name]
         ):
             raise ContractError(f"templateValue.{name} must contain concrete facts")
+    play_model = analysis["playDecisionModel"]
+    if not isinstance(play_model, Mapping) or set(play_model) != {
+        "funProposition", "userRecreationWish", "coreUserDecisions"
+    }:
+        raise ContractError("playDecisionModel must explain fun, recreation wish, and user decisions")
+    _non_empty_text(play_model["funProposition"], "playDecisionModel.funProposition")
+    _non_empty_text(play_model["userRecreationWish"], "playDecisionModel.userRecreationWish")
+    decisions = play_model["coreUserDecisions"]
+    if not isinstance(decisions, list) or not decisions:
+        raise ContractError("playDecisionModel requires at least one core user decision")
+    decision_ids: list[str] = []
+    for decision in decisions:
+        if not isinstance(decision, Mapping) or set(decision) != {
+            "decisionId", "description", "slotId", "evidence"
+        }:
+            raise ContractError("core user decisions require decision, slot, and evidence fields")
+        decision_ids.append(_non_empty_text(decision["decisionId"], "core decisionId"))
+        for field in ("description", "slotId", "evidence"):
+            _non_empty_text(decision[field], f"core decision {field}")
+    if len(set(decision_ids)) != len(decision_ids):
+        raise ContractError("core user decision IDs must be unique")
     for name in (
         "componentGraph", "identityTopology", "textRegions", "spatialRelations",
         "containers", "fixedStructure", "editableCandidates", "warnings",
@@ -584,34 +520,57 @@ def compile_semantics_from_analysis(analysis: Mapping[str, Any]) -> dict[str, An
     }
 
 
-def _validate_single_slot_exhaustion(exhaustion: Any, slot_id: str) -> None:
-    axes = {"subject", "text", "object", "clothing", "color", "prop", "scene", "nested_content"}
+def _validate_slot_coverage_review(
+    review: Any,
+    slot_ids: Sequence[str],
+    component_ids: set[str],
+    candidate_component_ids: set[str],
+) -> None:
+    axes = set(_contract()["authoring"]["slotDecisionAxes"])
     if (
-        not isinstance(exhaustion, Mapping)
-        or set(exhaustion) != {"selectedSlotIds", "axes"}
-        or exhaustion.get("selectedSlotIds") != [slot_id]
-        or not isinstance(exhaustion.get("axes"), Mapping)
-        or set(exhaustion["axes"]) != axes
+        not isinstance(review, Mapping)
+        or set(review) != {"selectedSlotIds", "axes"}
+        or review.get("selectedSlotIds") != list(slot_ids)
+        or not isinstance(review.get("axes"), Mapping)
+        or set(review["axes"]) != axes
     ):
-        raise ContractError("single-slot exhaustion evidence must cover every candidate axis")
-    occurrences = 0
-    for axis, axis_evidence in exhaustion["axes"].items():
-        if not isinstance(axis_evidence, Mapping) or set(axis_evidence) != {"candidateSlotIds", "evidence"}:
-            raise ContractError(f"single-slot exhaustion axis {axis} is incomplete")
-        _non_empty_text(axis_evidence["evidence"], f"single-slot exhaustion {axis}")
-        candidates = axis_evidence["candidateSlotIds"]
-        if not isinstance(candidates, list) or any(candidate != slot_id for candidate in candidates):
-            raise ContractError("single-slot exhaustion names an unknown slot")
-        if len(candidates) > 1:
-            raise ContractError("single-slot exhaustion repeats its selected slot")
-        occurrences += len(candidates)
-    if occurrences != 1:
-        raise ContractError("single-slot exhaustion must account for the selected slot exactly once")
+        raise ContractError("slot coverage review must cover every candidate axis and formal slot")
+    selected_occurrences: list[str] = []
+    covered_components: set[str] = set()
+    for axis, axis_evidence in review["axes"].items():
+        if not isinstance(axis_evidence, Mapping) or set(axis_evidence) != {
+            "candidateComponentIds", "selectedSlotIds", "evidence"
+        }:
+            raise ContractError(f"slot coverage axis {axis} is incomplete")
+        _non_empty_text(axis_evidence["evidence"], f"slot coverage {axis}")
+        candidates = axis_evidence["candidateComponentIds"]
+        selected = axis_evidence["selectedSlotIds"]
+        if (
+            not isinstance(candidates, list)
+            or len(set(candidates)) != len(candidates)
+            or not set(candidates).issubset(component_ids)
+        ):
+            raise ContractError("slot coverage candidate components must be unique and known")
+        if (
+            not isinstance(selected, list)
+            or len(set(selected)) != len(selected)
+            or not set(selected).issubset(set(slot_ids))
+        ):
+            raise ContractError("slot coverage selected slots must be unique and formal")
+        covered_components.update(candidates)
+        selected_occurrences.extend(selected)
+    if selected_occurrences != list(dict.fromkeys(selected_occurrences)):
+        raise ContractError("each formal slot must have one primary decision axis")
+    if set(selected_occurrences) != set(slot_ids):
+        raise ContractError("slot coverage review must classify every formal slot exactly once")
+    if not candidate_component_ids.issubset(covered_components):
+        raise ContractError("slot coverage review omitted an editable candidate component")
 
 
 def _validate_text_regions(regions: Sequence[Mapping[str, Any]]) -> None:
     authoring = _contract()["authoring"]
     seen: set[str] = set()
+    semantic_units: dict[str, tuple[str, Any, str]] = {}
     for region in regions:
         if not isinstance(region, Mapping):
             raise ContractError("text regions must be objects")
@@ -626,6 +585,10 @@ def _validate_text_regions(regions: Sequence[Mapping[str, Any]]) -> None:
             raise ContractError("text region action is invalid")
         if region.get("editValue") != authoring["textEditValueByAction"][action]:
             raise ContractError("text region edit value differs from its route")
+        semantic_unit_id = _non_empty_text(region.get("semanticUnitId"), "text semanticUnitId")
+        semantic_unit_role = region.get("semanticUnitRole")
+        if semantic_unit_role not in authoring["textSemanticUnitRoles"]:
+            raise ContractError("text semantic unit role is invalid")
         _non_empty_text(region.get("routingEvidence"), "text region routing evidence")
         if region["role"] == "watermark" and action != "remove":
             raise ContractError("watermark text can only be removed")
@@ -633,6 +596,13 @@ def _validate_text_regions(regions: Sequence[Mapping[str, Any]]) -> None:
             raise ContractError("ambiguous text must remain under review")
         for field in ("language", "exactText", "layout", "position"):
             _non_empty_text(region.get(field), f"text region {field}")
+        slot_id = region.get("slotId") if action == "open_slot" else None
+        if action != "open_slot" and region.get("slotId") is not None:
+            raise ContractError("only open text regions may name a slot")
+        signature = (action, slot_id, semantic_unit_role)
+        if semantic_unit_id in semantic_units and semantic_units[semantic_unit_id] != signature:
+            raise ContractError("one text semantic unit must share one route, slot, and role")
+        semantic_units[semantic_unit_id] = signature
 
 
 def validate_authoring_contract(
@@ -674,9 +644,19 @@ def validate_authoring_contract(
     slots = formal_draft.get("inputSchema", {}).get("slots", [])
     if not isinstance(slots, list) or not slots:
         raise ContractError("inputSchema requires at least one slot")
+    slot_count_preference = authoring["slotCountPreference"]
+    if len(slots) > slot_count_preference["maximum"]:
+        raise ContractError("production templates allow at most four high-value slots")
     slot_ids = [slot.get("id") for slot in slots]
     if any(not isinstance(slot_id, str) or not slot_id for slot_id in slot_ids) or len(set(slot_ids)) != len(slot_ids):
         raise ContractError("slot IDs must be unique and non-empty")
+    core_decisions = analysis["playDecisionModel"]["coreUserDecisions"]
+    decision_slot_ids = [decision["slotId"] for decision in core_decisions]
+    if len(set(decision_slot_ids)) != len(decision_slot_ids) or set(decision_slot_ids) != set(slot_ids):
+        raise ContractError("core user decisions must map one-to-one to every formal slot")
+    decision_ids_by_slot = {
+        decision["slotId"]: decision["decisionId"] for decision in core_decisions
+    }
     slot_evidence = analysis["slotEvidence"]
     if not isinstance(slot_evidence, Mapping) or set(slot_evidence) != set(slot_ids):
         raise ContractError("every slot requires independent high-value evidence")
@@ -698,11 +678,6 @@ def validate_authoring_contract(
         slot["id"] for slot in slots if slot.get("image") is not None
     } or any(value is not True for value in semantic_model["sourceIsolationByInput"].values()):
         raise ContractError("every image input requires source-isolation evidence")
-    if len(slot_ids) == 1:
-        _validate_single_slot_exhaustion(analysis.get("singleSlotExhaustion"), slot_ids[0])
-    elif "singleSlotExhaustion" in analysis:
-        raise ContractError("singleSlotExhaustion is only valid for a one-slot template")
-
     targets = formal_draft.get("runtimeSemantics", {}).get("targetInstances", [])
     target_ids = {target.get("id") for target in targets if isinstance(target, Mapping)}
     if len(target_ids) != len(targets) or None in target_ids:
@@ -740,9 +715,11 @@ def validate_authoring_contract(
         raise ContractError("analysis counts differ from the independently derived quantities")
     editable_slot_ids: list[str] = []
     component_ids = {component["componentId"] for component in analysis["componentGraph"]}
+    candidate_component_ids: set[str] = set()
     for candidate in analysis["editableCandidates"]:
         if not isinstance(candidate, Mapping) or candidate.get("componentId") not in component_ids:
             raise ContractError("editableCandidates references an unknown component")
+        candidate_component_ids.add(candidate["componentId"])
         if candidate.get("selected") is True:
             if (
                 not isinstance(candidate.get("slotId"), str)
@@ -758,14 +735,22 @@ def validate_authoring_contract(
             raise ContractError("editable candidate must state whether it was selected")
     if set(editable_slot_ids) != set(slot_ids) or len(editable_slot_ids) != len(set(editable_slot_ids)):
         raise ContractError("editableCandidates must account for every compiled slot")
+    _validate_slot_coverage_review(
+        analysis["slotCoverageReview"], slot_ids, component_ids, candidate_component_ids
+    )
     has_open_identity = False
     for slot in slots:
         evidence = slot_evidence[slot["id"]]
         if not isinstance(evidence, Mapping) or any(
             evidence.get(name) is not True
-            for name in ("userMotivation", "visuallyVisible", "modelControllable", "mechanismPreserved")
+            for name in (
+                "userMotivation", "independentUserChoice", "meaningfulVariation",
+                "visuallyVisible", "modelControllable", "mechanismPreserved",
+            )
         ):
             raise ContractError(f"slot {slot['id']} failed the high-value gate")
+        if evidence.get("decisionId") != decision_ids_by_slot[slot["id"]]:
+            raise ContractError(f"slot {slot['id']} differs from its core user decision")
         _non_empty_text(evidence.get("visualEvidence"), f"slot evidence {slot['id']}")
         if evidence.get("selectionReason") not in authoring["allowedSlotSelectionReasons"]:
             raise ContractError(f"slot {slot['id']} lacks an allowed selection reason")
@@ -1083,8 +1068,11 @@ def validate_formal_json(formal: Mapping[str, Any]) -> None:
     cover, reference = formal.get("cover"), formal.get("referenceImage")
     if cover != reference:
         raise ContractError("cover and referenceImage must be identical")
-    if not isinstance(cover, str) or not cover.startswith(_contract()["oss"]["baseUrl"] + "/gallery/templates/"):
-        raise ContractError("formal image URL must use the Memebuy production base")
+    image_asset = _contract()["imageAsset"]
+    if not isinstance(cover, str) or not cover.startswith(
+        image_asset["baseUrl"] + image_asset["pathPrefix"]
+    ):
+        raise ContractError("formal image URL must use the immutable Memebuy template-image path")
     bindings = formal.get("runtimeSemantics", {}).get("inputBindings", {})
     for input_id, binding in bindings.items():
         if binding.get("operation") == "replace_identity" and binding.get("clothingOwnership") not in {
@@ -1104,68 +1092,24 @@ def validate_formal_json(formal: Mapping[str, Any]) -> None:
         raise ContractError(f"Gallery snapshot validation failed at {path}: {errors[0].message}")
 
 
-def build_json_review_package(
+def compile_final_json(
     approved_image: Mapping[str, Any],
     analysis: Mapping[str, Any],
     formal_draft: Mapping[str, Any],
     registry_response: Mapping[str, Any],
-    *,
-    rule_version: str,
-    revision: int,
 ) -> dict[str, Any]:
+    """Compile a dashboard-ready formal object with no third human approval."""
+
     validate_approved_image_envelope(approved_image)
     validate_authoring_contract(analysis, formal_draft, approved_image)
-    if not isinstance(rule_version, str) or not rule_version or not isinstance(revision, int) or revision < 1:
-        raise ContractError("JSON review binding is invalid")
     _validate_registry_response(registry_response)
     if registry_response.get("decision") not in {"NEW", "EXISTING_SAME_SOURCE"}:
         raise ContractError("key resolution pauses this item")
     if formal_draft.get("key") != registry_response.get("resolvedKey"):
         raise ContractError("formal key differs from registry resolution")
-    approved_image_sha = approved_image["image"]["sha256"]
-    formal_preview = project_formal_json(formal_draft, approved_image_sha)
-    validate_formal_json(formal_preview)
-    return {
-        "state": "awaiting_json_approval",
-        "approvedImage": deepcopy(approved_image),
-        "frozenCandidateKey": registry_response["resolvedKey"],
-        "registry": deepcopy(registry_response),
-        "assetState": {
-            "status": "planned_not_uploaded",
-            "previewUri": approved_image["image"]["uri"],
-            "plannedImmutableUrl": formal_preview["cover"],
-        },
-        "analysisSummary": {
-            "visualMechanism": analysis["visualMechanism"],
-            "counts": deepcopy(analysis["counts"]),
-            "warnings": deepcopy(analysis["warnings"]),
-        },
-        "templateValue": deepcopy(analysis["templateValue"]),
-        "titleEvidence": deepcopy(analysis["titleEvidence"]),
-        "descriptionEvidence": deepcopy(analysis["descriptionEvidence"]),
-        "tagEvidence": deepcopy(analysis["tagEvidence"]),
-        "slotCards": deepcopy(analysis["slotEvidence"]),
-        "copy": {
-            "title": formal_preview["title"],
-            "description": formal_preview["description"],
-            "tags": deepcopy(formal_preview["metadata"]["tags"]),
-        },
-        "slots": deepcopy(formal_preview["inputSchema"]["slots"]),
-        "promptTemplate": formal_preview["promptTemplate"],
-        "warnings": deepcopy(analysis["warnings"]),
-        "promptCoverage": deepcopy(analysis["promptCoverage"]),
-        "runtimeSummary": {
-            "targetInstances": deepcopy(formal_preview["runtimeSemantics"]["targetInstances"]),
-            "inputBindings": deepcopy(formal_preview["runtimeSemantics"]["inputBindings"]),
-            "visualContract": deepcopy(formal_preview["runtimeSemantics"]["visualContract"]),
-        },
-        "selfReview": deepcopy(analysis["selfReview"]),
-        "formalPreview": formal_preview,
-        "objectSha256": sha256_json(formal_preview),
-        "approvedImageSha256": approved_image_sha,
-        "ruleVersion": rule_version,
-        "revision": revision,
-    }
+    formal = project_formal_json(formal_draft, approved_image)
+    validate_formal_json(formal)
+    return formal
 
 
 def _validate_registry_response(response: Mapping[str, Any]) -> None:
@@ -1189,193 +1133,20 @@ def _validate_registry_response(response: Mapping[str, Any]) -> None:
         raise ContractError("successful key decision requires resolvedKey")
 
 
-def _validate_json_approval(
-    formal: Mapping[str, Any], approved_image_sha256: str, approval: Mapping[str, Any],
-    *, rule_version: str, revision: int,
-) -> None:
-    if set(approval) != {
-        "decision", "objectSha256", "approvedImageSha256", "reviewerRef", "decidedAt",
-        "ruleVersion", "revision",
-    }:
-        raise ContractError("JSON approval fields differ from the frozen schema")
-    _validate_human_review_facts(approval)
-    if (
-        approval.get("decision") != "APPROVED"
-        or approval.get("objectSha256") != sha256_json(formal)
-        or approval.get("approvedImageSha256") != approved_image_sha256
-        or approval.get("ruleVersion") != rule_version
-        or approval.get("revision") != revision
-    ):
-        raise ContractError("JSON approval is missing or stale")
-
-
-def _validate_human_review_facts(value: Mapping[str, Any]) -> None:
-    _non_empty_text(value.get("reviewerRef"), "reviewerRef")
-    decided_at = _non_empty_text(value.get("decidedAt"), "decidedAt")
-    try:
-        datetime.fromisoformat(decided_at.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ContractError("decidedAt must be an ISO-8601 timestamp") from exc
-
-
-def project_formal_json(formal_draft: Mapping[str, Any], approved_image_sha256: str) -> dict[str, Any]:
-    """Create the exact human-reviewable formal object before any OSS mutation."""
+def project_formal_json(
+    formal_draft: Mapping[str, Any], approved_image: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Project the immutable upstream image URL directly into the formal object."""
 
     if "cover" in formal_draft or "referenceImage" in formal_draft:
         raise ContractError("formal draft must not pre-populate OSS URLs")
-    if not isinstance(approved_image_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", approved_image_sha256):
-        raise ContractError("approved image SHA-256 is invalid")
-    key = _validate_key(formal_draft.get("key"))
-    oss = _contract()["oss"]
-    object_key = oss["objectKeyTemplate"].format(
-        key=key, approvedImageSha256=approved_image_sha256
-    )
-    url = f"{oss['baseUrl']}/{object_key}"
+    validate_approved_image_envelope(approved_image)
+    _validate_key(formal_draft.get("key"))
+    url = approved_image["image"]["uri"]
     formal = deepcopy(dict(formal_draft))
     formal["cover"] = url
     formal["referenceImage"] = url
     return formal
-
-
-def oss_intent(key: str, png_bytes: bytes) -> dict[str, Any]:
-    _validate_key(key)
-    if not png_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-        raise ContractError("OSS input must be the exact approved PNG bytes")
-    digest = _sha_bytes(png_bytes)
-    contract = _contract()["oss"]
-    object_key = contract["objectKeyTemplate"].format(key=key, approvedImageSha256=digest)
-    public_url = f"{contract['baseUrl']}/{object_key}"
-    parsed = urlparse(public_url)
-    if parsed.scheme != "https" or parsed.netloc != "assets.memebuy.cn" or parsed.query or parsed.fragment:
-        raise ContractError("Memebuy public URL policy mismatch")
-    request_identity = sha256_json({
-        "objectKey": object_key,
-        "sha256": digest,
-        "byteLength": len(png_bytes),
-        "remoteIdentity": object_key,
-    })
-    return {
-        "key": key,
-        "approvedImageSha256": digest,
-        "objectDigest": digest,
-        "byteLength": len(png_bytes),
-        "objectKey": object_key,
-        "remoteIdentity": object_key,
-        "requestIdentity": request_identity,
-        "publicHttpsUrl": public_url,
-    }
-
-
-def validate_oss_receipt(receipt: Mapping[str, Any]) -> None:
-    schema = json.loads((
-        _SKILL_ROOT / "references/contracts/oss-receipt.schema.json"
-    ).read_text(encoding="utf-8"))
-    errors = sorted(
-        Draft202012Validator(schema, format_checker=FormatChecker()).iter_errors(receipt),
-        key=lambda error: list(error.path),
-    )
-    if errors:
-        raise ContractError("OSS receipt invalid: " + errors[0].message)
-    if receipt["objectDigest"] != receipt["approvedImageSha256"]:
-        raise ContractError("OSS object digest differs from the Approved Image SHA")
-    if receipt["providerReceiptDigest"] != sha256_json(receipt["providerReceipt"]):
-        raise ContractError("OSS provider receipt digest mismatch")
-
-
-def finalize_approved_json(
-    formal_draft: Mapping[str, Any],
-    approval: Mapping[str, Any],
-    approved_png_bytes: bytes,
-    adapter: OssAdapter,
-    *,
-    rule_version: str,
-    revision: int,
-    uploaded_at: str,
-    existing_receipt: Mapping[str, Any] | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Perform the first remote mutation only after valid human JSON approval."""
-
-    key = _validate_key(formal_draft.get("key"))
-    _non_empty_text(uploaded_at, "uploadedAt")
-    intent = oss_intent(key, approved_png_bytes)
-    formal = project_formal_json(formal_draft, intent["approvedImageSha256"])
-    validate_formal_json(formal)
-    _validate_json_approval(
-        formal, intent["approvedImageSha256"], approval,
-        rule_version=rule_version, revision=revision,
-    )
-
-    if existing_receipt is not None:
-        validate_oss_receipt(existing_receipt)
-        receipt_identity = {
-            name: existing_receipt.get(name)
-            for name in (
-                "key", "approvedImageSha256", "objectDigest", "byteLength", "objectKey",
-                "remoteIdentity", "requestIdentity", "publicHttpsUrl",
-            )
-        }
-        provider_receipt = existing_receipt.get("providerReceipt")
-        if (
-            receipt_identity != intent
-            or not isinstance(provider_receipt, Mapping)
-            or existing_receipt.get("providerReceiptDigest") != sha256_json(provider_receipt)
-            or not isinstance(existing_receipt.get("uploadedAt"), str)
-            or not existing_receipt["uploadedAt"]
-        ):
-            raise ContractError("existing OSS receipt does not match the approved upload intent")
-        return formal, deepcopy(dict(existing_receipt))
-
-    remote = adapter.head(intent["objectKey"])
-    expected_remote = {
-        "objectKey": intent["objectKey"],
-        "sha256": intent["approvedImageSha256"],
-        "byteLength": intent["byteLength"],
-        "remoteIdentity": intent["remoteIdentity"],
-        "requestIdentity": intent["requestIdentity"],
-    }
-    if remote is not None:
-        if not isinstance(remote, Mapping):
-            raise ContractError("OSS head response must be an object")
-        actual = {name: remote.get(name) for name in expected_remote}
-        if actual != expected_remote:
-            raise ContractError("existing OSS object conflicts; overwrite prohibited")
-        provider_receipt = {"reused": True, **actual}
-    else:
-        raw_put_response = adapter.put_create_once(
-            intent["objectKey"],
-            approved_png_bytes,
-            {
-                "sha256": intent["approvedImageSha256"],
-                "byteLength": intent["byteLength"],
-                "remoteIdentity": intent["remoteIdentity"],
-                "requestIdentity": intent["requestIdentity"],
-            },
-        )
-        if not isinstance(raw_put_response, Mapping):
-            raise ContractError("OSS create response must be an object")
-        put_response = dict(raw_put_response)
-        if {name: put_response.get(name) for name in expected_remote} != expected_remote:
-            raise ContractError("OSS create response differs from the approved upload intent")
-        reconciled = adapter.head(intent["objectKey"])
-        if not isinstance(reconciled, Mapping) or {
-            name: reconciled.get(name) for name in expected_remote
-        } != expected_remote:
-            raise ContractError("OSS object reconciliation differs from the approved upload intent")
-        provider_receipt = {
-            "created": True,
-            **expected_remote,
-            **({"providerRequestId": put_response["providerRequestId"]}
-               if isinstance(put_response.get("providerRequestId"), str) else {}),
-        }
-
-    receipt = {
-        **intent,
-        "providerReceipt": provider_receipt,
-        "providerReceiptDigest": sha256_json(provider_receipt),
-        "uploadedAt": uploaded_at,
-    }
-    validate_oss_receipt(receipt)
-    return formal, receipt
 
 
 def write_formal_json(delivery_root: Path, formal: Mapping[str, Any]) -> Path:
@@ -1520,6 +1291,49 @@ def _safe_batch_failure(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, ContractError):
         return exc.code, "current item failed a deterministic contract gate"
     return "UNEXPECTED_ITEM_FAILURE", "current item failed at an unexpected boundary"
+
+
+def build_batch_identity_diversity_report(
+    items: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Summarize repeated recognized identities across the complete production job."""
+
+    limits = _contract()["batch"]
+    if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
+        raise ContractError("identity diversity items must be a sequence")
+    if not limits["minimumItems"] <= len(items) <= limits["maximumJobItems"]:
+        raise ContractError("identity diversity job size must be between 1 and 5000")
+    usage: dict[str, list[str]] = {}
+    seen_items: set[str] = set()
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise ContractError("identity diversity items must be objects")
+        item_id = _non_empty_text(item.get("itemId"), "identity diversity itemId")
+        if item_id in seen_items:
+            raise ContractError("identity diversity itemIds must be unique")
+        seen_items.add(item_id)
+        analysis = item.get("analysis")
+        if not isinstance(analysis, Mapping) or not isinstance(analysis.get("slotEvidence"), Mapping):
+            raise ContractError("identity diversity items require approved analysis slot evidence")
+        names: set[str] = set()
+        for evidence in analysis["slotEvidence"].values():
+            recognition = evidence.get("identityRecognition") if isinstance(evidence, Mapping) else None
+            if isinstance(recognition, Mapping) and recognition.get("status") == "recognized":
+                names.add(_non_empty_text(recognition.get("canonicalName"), "recognized identity name"))
+        for name in names:
+            usage.setdefault(name, []).append(item_id)
+    repeated = [
+        {"canonicalName": name, "count": len(item_ids), "itemIds": sorted(item_ids)}
+        for name, item_ids in sorted(usage.items())
+        if len(item_ids) > 1
+    ]
+    return {
+        "itemCount": len(items),
+        "recognizedIdentityCount": len(usage),
+        "usageByIdentity": {name: len(item_ids) for name, item_ids in sorted(usage.items())},
+        "repeatedIdentities": repeated,
+        "qualitySignal": "identity_concentration" if repeated else "clear",
+    }
 
 
 def process_batch(

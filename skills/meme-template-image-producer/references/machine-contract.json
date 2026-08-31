@@ -1,5 +1,5 @@
 {
-  "contractVersion": 2,
+  "contractVersion": 4,
   "replacementRequired": true,
   "provider": "fal",
   "providerEnvironment": {"credential": "FAL_KEY", "adapterFactory": "create_fal_adapter_from_environment"},
@@ -91,5 +91,21 @@
       "decidedAt", "ruleVersion", "revision"
     ]
   },
-  "batch": {"minimumItems": 1, "maximumItems": 100}
+  "oss": {
+    "profile": "memebuy-production",
+    "baseUrl": "https://assets.memebuy.cn",
+    "objectKeyTemplate": "gallery/template-images/{approvedImageSha256}.png",
+    "adapterFactory": "create_aliyun_oss_adapter_from_environment",
+    "environment": [
+      "OSS_ENDPOINT", "OSS_BUCKET_NAME", "OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_SECRET"
+    ]
+  },
+  "batch": {
+    "minimumItems": 1,
+    "maximumItems": 100,
+    "defaultShardSize": 50,
+    "maximumJobItems": 5000,
+    "identityFingerprintGranularity": "franchise::character",
+    "diversityReportBuilder": "build_replacement_diversity_report"
+  }
 }

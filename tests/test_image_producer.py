@@ -27,6 +27,22 @@ class FakeFal:
         return {"request_id": "fake-request"}
 
 
+class FakeOss:
+    def __init__(self, existing=None):
+        self.existing = existing
+        self.head_calls = []
+        self.put_calls = []
+
+    def head(self, object_key):
+        self.head_calls.append(object_key)
+        return self.existing
+
+    def put_create_once(self, object_key, content, metadata):
+        self.put_calls.append((object_key, content, dict(metadata)))
+        self.existing = {"objectKey": object_key, **metadata}
+        return dict(self.existing)
+
+
 class SchemaPersistingAttempt(MutableMapping):
     """Mirror the production store: bulk writes are atomic, field writes persist immediately."""
 
@@ -415,7 +431,7 @@ class ImageProducerTests(unittest.TestCase):
         with self.assertRaises(producer.ContractError):
             producer.build_revision_review_context(history, 2, [])
 
-    def test_only_fresh_human_image_review_creates_minimal_envelope(self):
+    def test_only_fresh_human_image_review_crosses_the_upload_boundary(self):
         digest = producer.sha256_bytes(PNG_BYTES)
         context = producer.build_revision_review_context([], 1, [])
         package = producer.build_image_review_package(
@@ -427,15 +443,15 @@ class ImageProducerTests(unittest.TestCase):
             hard_failures=[], warnings=[], revision_context=context,
         )
         review = valid_image_approval(package)
-        envelope = producer.approve_generated_png(
+        image = producer.approve_generated_png(
             PNG_BYTES,
             review,
             package,
             rule_version="0.2.0",
             revision=1,
         )
-        self.assertEqual(set(envelope), {"schemaVersion", "status", "image"})
-        self.assertEqual(set(envelope["image"]), {"uri", "sha256", "width", "height", "mime"})
+        self.assertEqual(image["sha256"], digest)
+        self.assertEqual(set(image), {"sha256", "width", "height", "mime"})
         with self.assertRaises(producer.ContractError):
             producer.approve_generated_png(
                 PNG_BYTES,
@@ -558,6 +574,23 @@ class ImageProducerTests(unittest.TestCase):
         self.assertEqual(first, reordered)
         self.assertEqual(set(first), {"item-a", "item-b", "item-c"})
 
+    def test_batch_diversity_report_avoids_one_anime_identity_when_alternatives_exist(self):
+        report = producer.build_replacement_diversity_report({
+            "item-a": ["vocaloid::初音未来", "eva::绫波丽"],
+            "item-b": ["vocaloid::初音未来", "eva::绫波丽"],
+            "item-c": ["vocaloid::初音未来", "frieren::芙莉莲"],
+        })
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(max(report["usageByFingerprint"].values()), 1)
+        self.assertEqual(report["avoidableConcentration"], [])
+
+        concentrated = producer.build_replacement_diversity_report({
+            "4-a": ["x", "y"],
+            "4-b": ["x"],
+        })
+        self.assertEqual(concentrated["status"], "REVIEW")
+        self.assertEqual(concentrated["avoidableConcentration"][0]["itemId"], "4-a")
+
     def test_fresh_human_image_approval_can_accept_advisory_machine_findings(self):
         digest = producer.sha256_bytes(PNG_BYTES)
         facts = {"uri": "fixture://bad.png", "width": 1024, "height": 1024}
@@ -568,10 +601,70 @@ class ImageProducerTests(unittest.TestCase):
             revision_context=producer.build_revision_review_context([], 1, []),
         )
         review = valid_image_approval(package)
-        envelope = producer.approve_generated_png(
+        image = producer.approve_generated_png(
             PNG_BYTES, review, package, rule_version="0.2.0", revision=1
         )
-        self.assertEqual(envelope["image"]["sha256"], digest)
+        self.assertEqual(image["sha256"], digest)
+
+    def test_approved_image_is_uploaded_once_before_downstream_delivery(self):
+        digest = producer.sha256_bytes(PNG_BYTES)
+        package = producer.build_image_review_package(
+            PNG_BYTES, SOURCE_IMAGE,
+            {"uri": "fixture://approved.png", "width": 1024, "height": 1024},
+            item_id="item-a", rule_version="0.2.0", revision=1,
+            evidence=valid_evidence(), hard_failures=[], warnings=[],
+            revision_context=producer.build_revision_review_context([], 1, []),
+        )
+        oss = FakeOss()
+        envelope, receipt = producer.finalize_approved_template_image(
+            PNG_BYTES, valid_image_approval(package), package, oss,
+            rule_version="0.2.0", revision=1, uploaded_at="2026-08-29T12:00:00Z",
+        )
+        expected_key = f"gallery/template-images/{digest}.png"
+        self.assertEqual(receipt["objectKey"], expected_key)
+        self.assertEqual(envelope["schemaVersion"], 2)
+        self.assertEqual(envelope["status"], "approved_uploaded")
+        self.assertEqual(
+            envelope["image"]["uri"], f"https://assets.memebuy.cn/{expected_key}"
+        )
+        self.assertEqual(len(oss.put_calls), 1)
+        recovered, recovered_receipt = producer.finalize_approved_template_image(
+            PNG_BYTES, valid_image_approval(package), package, FakeOss(),
+            rule_version="0.2.0", revision=1, uploaded_at="2026-08-29T12:00:00Z",
+            existing_receipt=receipt,
+        )
+        self.assertEqual(recovered, envelope)
+        self.assertEqual(recovered_receipt, receipt)
+
+    def test_large_job_plans_deterministic_shards_and_chat_reviews(self):
+        plan = producer.plan_production_job([f"item-{index}" for index in range(123)])
+        self.assertEqual(plan["shardCount"], 3)
+        self.assertEqual([shard["itemCount"] for shard in plan["shards"]], [50, 50, 23])
+
+        strategy_values = [
+            valid_strategy(producer, item_id=f"item-{index}") for index in range(2)
+        ]
+        strategies = [
+            producer.build_strategy_review_package(strategy) for strategy in strategy_values
+        ]
+        strategy_review = producer.build_batch_strategy_chat_review(
+            strategies, batch_id="batch-a"
+        )
+        self.assertEqual(strategy_review["reviewSurface"], "codex_chat")
+        self.assertEqual(strategy_review["decisionMode"], "approve_all_or_exclude_item_ids")
+        decision = producer.resolve_batch_chat_approval(
+            strategy_review, excluded_item_ids=["item-1"],
+            reviewer_ref="reviewer://batch/test", decided_at="2026-08-29T12:00:00Z",
+        )
+        self.assertEqual(decision["approvedItemIds"], ["item-0"])
+        self.assertEqual(decision["excludedItemIds"], ["item-1"])
+        expected = valid_strategy_approval(strategy_values[0])
+        actual = decision["itemApprovals"]["item-0"]
+        for field in (
+            "objectSha256", "strategySha256", "promptSha256", "sourceImageSha256",
+            "inputUriSha256", "ruleVersion", "revision",
+        ):
+            self.assertEqual(actual[field], expected[field])
 
     def test_image_batch_isolation_and_bounds(self):
         items = [{"itemId": "bad", "revision": 1}, {"itemId": "good", "revision": 1}]

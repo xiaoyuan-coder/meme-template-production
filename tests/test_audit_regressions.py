@@ -64,36 +64,22 @@ class ReconcilingOss:
         }
         response = dict(self.created)
         if self.bad_put:
-            response["objectKey"] = "gallery/templates/wrong/object.png"
+            response["objectKey"] = "gallery/template-images/wrong.png"
         return response
 
 
 def image_envelope():
     digest = hashlib.sha256(PNG_BYTES).hexdigest()
     return {
-        "schemaVersion": 1,
-        "status": "approved",
+        "schemaVersion": 2,
+        "status": "approved_uploaded",
         "image": {
-            "uri": "fixture://approved.png",
+            "uri": f"https://assets.memebuy.cn/gallery/template-images/{digest}.png",
             "sha256": digest,
             "width": 1024,
             "height": 1024,
             "mime": "image/png",
         },
-    }
-
-
-def json_approval(draft):
-    digest = hashlib.sha256(PNG_BYTES).hexdigest()
-    formal = compiler.project_formal_json(draft, digest)
-    return {
-        "decision": "APPROVED",
-        "objectSha256": compiler.sha256_json(formal),
-        "approvedImageSha256": digest,
-        "reviewerRef": "reviewer://json/42",
-        "decidedAt": "2026-08-29T12:00:00Z",
-        "ruleVersion": "0.2.0",
-        "revision": 1,
     }
 
 
@@ -364,26 +350,26 @@ class AuditRegressionTests(unittest.TestCase):
             "OSS_ACCESS_KEY_ID": "access-id-secret",
             "OSS_ACCESS_KEY_SECRET": "access-secret",
         }
-        with self.assertRaises(compiler.AdapterConfigurationError):
-            compiler.create_aliyun_oss_adapter_from_environment({})
-        with self.assertRaises(compiler.AdapterConfigurationError) as dependency:
-            compiler.create_aliyun_oss_adapter_from_environment(
+        with self.assertRaises(producer.AdapterConfigurationError):
+            producer.create_aliyun_oss_adapter_from_environment({})
+        with self.assertRaises(producer.AdapterConfigurationError) as dependency:
+            producer.create_aliyun_oss_adapter_from_environment(
                 env, module_loader=lambda _: (_ for _ in ()).throw(ModuleNotFoundError("secret"))
             )
         self.assertNotIn("access-secret", str(dependency.exception))
-        adapter = compiler.create_aliyun_oss_adapter_from_environment(
+        adapter = producer.create_aliyun_oss_adapter_from_environment(
             env, module_loader=lambda _: OssModule
         )
         metadata = {
             "sha256": "a" * 64, "byteLength": len(PNG_BYTES),
-            "remoteIdentity": "gallery/templates/key/a.png", "requestIdentity": "b" * 64,
+            "remoteIdentity": "gallery/template-images/a.png", "requestIdentity": "b" * 64,
         }
-        response = adapter.put_create_once("gallery/templates/key/a.png", PNG_BYTES, metadata)
-        self.assertEqual(response["objectKey"], "gallery/templates/key/a.png")
+        response = adapter.put_create_once("gallery/template-images/a.png", PNG_BYTES, metadata)
+        self.assertEqual(response["objectKey"], "gallery/template-images/a.png")
         self.assertEqual(adapter._bucket.headers["x-oss-forbid-overwrite"], "true")
         self.assertEqual(adapter._bucket.headers["x-oss-meta-sha256"], "a" * 64)
-        self.assertEqual(adapter.head("gallery/templates/key/a.png"), metadata | {
-            "objectKey": "gallery/templates/key/a.png"
+        self.assertEqual(adapter.head("gallery/template-images/a.png"), metadata | {
+            "objectKey": "gallery/template-images/a.png"
         })
         encoded = json.dumps(response)
         self.assertNotIn("access-id-secret", encoded)
@@ -393,9 +379,9 @@ class AuditRegressionTests(unittest.TestCase):
             def put_object(key, content, *, headers):
                 raise RuntimeError("OSS_ACCESS_KEY_SECRET=provider-secret")
 
-        with self.assertRaises(compiler.ExternalAdapterError) as failure:
-            compiler.AliyunOssAdapter(FailingBucket()).put_create_once(
-                "gallery/templates/key/a.png", PNG_BYTES, metadata
+        with self.assertRaises(producer.ExternalAdapterError) as failure:
+            producer.AliyunOssAdapter(FailingBucket()).put_create_once(
+                "gallery/template-images/a.png", PNG_BYTES, metadata
             )
         self.assertNotIn("provider-secret", str(failure.exception))
 
@@ -503,10 +489,11 @@ class AuditRegressionTests(unittest.TestCase):
             "ruleVersion": "0.2.0",
             "revision": 1,
         }
-        envelope = producer.approve_generated_png(
+        image = producer.approve_generated_png(
             PNG_BYTES, review, package, rule_version="0.2.0", revision=1
         )
-        self.assertEqual(envelope["image"], package["generatedImage"])
+        self.assertEqual(image["sha256"], package["generatedImage"]["sha256"])
+        self.assertEqual(image["width"], package["generatedImage"]["width"])
         for field, value in (("uri", "fixture://swapped.png"), ("width", 2048), ("mime", "image/jpeg")):
             tampered = copy.deepcopy(package)
             tampered["generatedImage"][field] = value
@@ -532,11 +519,25 @@ class AuditRegressionTests(unittest.TestCase):
             self.assertEqual(results[1]["errorCode"], "UNEXPECTED_ITEM_FAILURE")
 
     def test_new_oss_upload_is_reconciled_before_receipt(self):
-        draft = valid_formal_draft()
+        context = producer.build_revision_review_context([], 1, [])
+        package = producer.build_image_review_package(
+            PNG_BYTES,
+            {"uri": "fixture://source.jpg", "sha256": "a" * 64,
+             "width": 1024, "height": 1024, "mime": "image/jpeg"},
+            {"uri": "fixture://approved.png", "width": 1024, "height": 1024},
+            item_id="item-a", rule_version="0.2.0", revision=1,
+            evidence=[], hard_failures=[], warnings=[], revision_context=context,
+        )
+        review = {
+            "decision": "APPROVED", "objectSha256": hashlib.sha256(PNG_BYTES).hexdigest(),
+            "reviewPackageSha256": producer.sha256_json(package),
+            "reviewerRef": "reviewer://image/42", "decidedAt": "2026-08-29T12:00:00Z",
+            "ruleVersion": "0.2.0", "revision": 1,
+        }
         for adapter in (ReconcilingOss(bad_put=True), ReconcilingOss(bad_head=True)):
-            with self.assertRaises(compiler.ContractError):
-                compiler.finalize_approved_json(
-                    draft, json_approval(draft), PNG_BYTES, adapter,
+            with self.assertRaises(producer.ContractError):
+                producer.finalize_approved_template_image(
+                    PNG_BYTES, review, package, adapter,
                     rule_version="0.2.0", revision=1,
                     uploaded_at="2026-08-29T12:00:00Z",
                 )
@@ -549,7 +550,7 @@ class AuditRegressionTests(unittest.TestCase):
 
         cases = []
         missing_axis = copy.deepcopy(analysis)
-        del missing_axis["singleSlotExhaustion"]["axes"]["scene"]
+        del missing_axis["slotCoverageReview"]["axes"]["scene"]
         cases.append(missing_axis)
         missing_component = copy.deepcopy(analysis)
         missing_component["semanticModel"]["componentCoverage"] = {}
@@ -561,7 +562,7 @@ class AuditRegressionTests(unittest.TestCase):
         fact_source_drift["semanticModel"]["dynamicFactSources"]["subject"] = "manual.value"
         cases.append(fact_source_drift)
         duplicate_axis = copy.deepcopy(analysis)
-        duplicate_axis["singleSlotExhaustion"]["axes"]["scene"]["candidateSlotIds"] = ["subject"]
+        duplicate_axis["slotCoverageReview"]["axes"]["scene"]["selectedSlotIds"] = ["subject"]
         cases.append(duplicate_axis)
         for invalid in cases:
             with self.assertRaises(compiler.ContractError):
@@ -575,9 +576,11 @@ class AuditRegressionTests(unittest.TestCase):
         translated = copy.deepcopy(analysis)
         translated["textRegions"] = [
             {"regionId": "source", "role": "content", "action": "free_editable",
+             "semanticUnitId": "translation-message", "semanticUnitRole": "supporting_copy",
              "editValue": "secondary", "routingEvidence": "可编辑的源语言副文案",
              "language": "en", "exactText": "HUG ME", "layout": "one line", "position": "top"},
             {"regionId": "translated", "role": "content", "action": "free_editable",
+             "semanticUnitId": "translation-message", "semanticUnitRole": "supporting_copy",
              "editValue": "secondary", "routingEvidence": "可编辑的译文副文案",
              "language": "zh-CN", "exactText": "抱抱我", "layout": "单行", "position": "下方",
              "translationSourceRegionId": "source"},
@@ -645,10 +648,10 @@ class AuditRegressionTests(unittest.TestCase):
                 [{
                     "itemId": "material-1631",
                     "skill": "meme-template-json-compiler",
-                    "state": "awaiting_json_approval",
+                    "state": "delivered",
                     "revision": 1,
-                    "stage": "json_review",
-                    "artifacts": {"review": "sidecar://material-1631/json-review.json"},
+                    "stage": "formal_json_written",
+                    "artifacts": {"formalJson": "delivery://material-1631/material-1631.json"},
                 }],
                 generated_at="2026-08-29T12:01:00Z",
             )
@@ -657,7 +660,7 @@ class AuditRegressionTests(unittest.TestCase):
                 {(item["skill"], item["state"]) for item in value["items"]},
                 {
                     ("meme-template-image-producer", "awaiting_strategy_approval"),
-                    ("meme-template-json-compiler", "awaiting_json_approval"),
+                    ("meme-template-json-compiler", "delivered"),
                 },
             )
 
@@ -696,7 +699,7 @@ class AuditRegressionTests(unittest.TestCase):
                     alias, [item(1)], generated_at="2026-08-29T12:00:00Z"
                 )
 
-    def test_all_three_human_approval_schemas_require_fresh_human_facts(self):
+    def test_both_human_approval_schemas_require_fresh_human_facts(self):
         strategy = valid_strategy(producer)
         strategy_package = producer.build_strategy_review_package(strategy)
         strategy_approval = {
@@ -718,8 +721,6 @@ class AuditRegressionTests(unittest.TestCase):
              ROOT / "skills/meme-template-image-producer/references/contracts"),
             ("image-approval.schema.json", image_schema_value,
              ROOT / "skills/meme-template-image-producer/references/contracts"),
-            ("json-approval.schema.json", json_approval(valid_formal_draft()),
-             ROOT / "skills/meme-template-json-compiler/references/contracts"),
         ]
         for filename, value, parent in values:
             schema = json.loads((parent / filename).read_text(encoding="utf-8"))
