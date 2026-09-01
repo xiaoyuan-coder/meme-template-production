@@ -1,5 +1,5 @@
 {
-  "contractVersion": 3,
+  "contractVersion": 4,
   "keyPattern": "^[a-z][a-z0-9-]{1,59}$",
   "keyDecisions": [
     "NEW",
@@ -81,6 +81,11 @@
       "minimum": 2,
       "maximum": 4,
       "singleSlotRequiresCoverageReview": true
+    },
+    "quickTextLimits": {
+      "maxContinuousCharacters": 20,
+      "maxWhitespaceTokens": 7,
+      "maxTotalCharacters": 48
     },
     "allowedSlotSelectionReasons": [
       "identity_control", "template_hook", "high_value_text", "exact_content_asset"

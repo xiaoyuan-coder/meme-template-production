@@ -491,6 +491,35 @@ class GalleryAndCompilationTests(unittest.TestCase):
         with self.assertRaises(compiler.ContractError):
             compiler.validate_authoring_contract(stale, changed, envelope)
 
+        mechanical = valid_approved_analysis(image_sha)
+        mechanical["selfReview"]["checks"]["slotRecallComplete"] = True
+        with self.assertRaisesRegex(compiler.ContractError, "concrete evidence"):
+            compiler.validate_authoring_contract(mechanical, valid_formal_draft(), envelope)
+
+    def test_quick_text_controls_enforce_short_copy_limits(self):
+        limits = compiler._contract()["authoring"]["quickTextLimits"]
+        regions = [{"action": "open_slot", "slotId": "headline"}]
+        valid_slot = [{
+            "id": "headline",
+            "text": {
+                "defaultValue": "EVERYTHING WILL BE OKAY",
+                "suggestions": ["OH LA LA", "SUMMER IS HERE", "MAKE IT YOURS"],
+            },
+        }]
+        compiler._validate_quick_text_slot_lengths(valid_slot, regions, limits)
+
+        long_sentence = copy.deepcopy(valid_slot)
+        long_sentence[0]["text"]["defaultValue"] = (
+            "THIS SUPPORTING SENTENCE HAS TOO MANY WORDS FOR A QUICK CONTROL"
+        )
+        with self.assertRaisesRegex(compiler.ContractError, "whitespace-token"):
+            compiler._validate_quick_text_slot_lengths(long_sentence, regions, limits)
+
+        long_continuous = copy.deepcopy(valid_slot)
+        long_continuous[0]["text"]["defaultValue"] = "这是一整段应该进入自由编辑层的陪衬说明文字"
+        with self.assertRaisesRegex(compiler.ContractError, "continuous-character"):
+            compiler._validate_quick_text_slot_lengths(long_continuous, regions, limits)
+
     def test_distinct_arrow_labels_compile_as_independent_text_slots(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {

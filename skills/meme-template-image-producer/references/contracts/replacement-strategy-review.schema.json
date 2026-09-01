@@ -9,7 +9,7 @@
     "replacementTarget", "replacementValue", "categoryContinuity", "identityResearch",
     "sourceIdentityUnitIds", "subjectContinuityEvidence", "identityBindingGroups",
     "assetUnitIds", "assetBindingGroups", "dependencyClosure", "featureAuthority",
-    "textActions", "markActions", "operations", "targetCanvas", "frozenSet", "mechanismAnalysis", "risks",
+    "textActions", "markActions", "operations", "targetCanvas", "frozenSet", "mechanismAnalysis", "visualFeatures", "risks",
     "promptSections", "prompt", "imageSize", "expectedFalCalls", "objectSha256",
     "strategySha256", "promptSha256"
   ],
@@ -31,7 +31,19 @@
     "sourcePreview": {"type": "string", "minLength": 1},
     "replacementTarget": {"type": "string", "minLength": 1},
     "replacementValue": {"type": "string", "minLength": 1},
-    "categoryContinuity": {"type": "object"},
+    "categoryContinuity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceCategory", "selectedCategory", "replacementIdentityOrigin", "crossCategoryMechanism"
+      ],
+      "properties": {
+        "sourceCategory": {"type": "string", "minLength": 1},
+        "selectedCategory": {"type": "string", "minLength": 1},
+        "replacementIdentityOrigin": {"enum": ["ai_generated", null]},
+        "crossCategoryMechanism": {"type": ["string", "null"]}
+      }
+    },
     "identityResearch": {"type": "object"},
     "sourceIdentityUnitIds": {"type": "array", "minItems": 1, "items": {"type": "string"}},
     "subjectContinuityEvidence": {"type": "array", "minItems": 1, "items": {"type": "object"}},
@@ -46,6 +58,13 @@
     "targetCanvas": {"type": "object"},
     "frozenSet": {"type": "array", "minItems": 1},
     "mechanismAnalysis": {"type": "object"},
+    "visualFeatures": {
+      "type": "object",
+      "required": [
+        "medium", "composition", "proportions", "colorAndLight", "surface",
+        "visualHook", "intentionalImperfections"
+      ]
+    },
     "risks": {"type": "array", "items": {"type": "object"}},
     "promptSections": {"type": "object"},
     "prompt": {"type": "string", "minLength": 1},

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://contracts.memebuy.cn/approved-image-analysis-v3.schema.json",
+  "$id": "https://contracts.memebuy.cn/approved-image-analysis-v4.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,7 +11,7 @@
     "translationEquivalences", "semanticModel", "selfReview", "warnings"
   ],
   "properties": {
-    "schemaVersion": {"const": 3},
+    "schemaVersion": {"const": 4},
     "approvedImageSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "visualMechanism": {"type": "string", "minLength": 1},
     "templateValue": {
@@ -94,7 +94,22 @@
       "properties": {
         "status": {"const": "PASS"},
         "reviewedDraftSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-        "checks": {"type": "object"},
+        "checks": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["passed", "evidence"],
+            "properties": {
+              "passed": {"const": true},
+              "evidence": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        },
         "issuesFound": {"type": "array", "maxItems": 0},
         "revisionsApplied": {"type": "array"}
       }

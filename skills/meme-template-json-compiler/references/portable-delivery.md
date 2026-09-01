@@ -20,4 +20,18 @@
 
 完整任务的分析结果通过 `build_batch_identity_diversity_report` 生成已识别身份分布，供生产质量追踪和后续选题复盘。每项通过确定性语义门禁与同轮 self-review 后，直接运行 `compile_final_json` 并写入交付目录。模板数据看板展示最终数据并承接返修；编译过程没有人工批准状态，也不访问 OSS。
 
+## 状态续跑与看板读回
+
+JSON-only revision 以现有 `approved_uploaded` envelope、当前 key 和上一版正式 JSON 为基线。新 revision 明确记录新增、删除和修改的 slot ID；未列入变更范围的槽位、主体拓扑、图片 URL 和 key 保持原值。需要换图的 item 单独回到图片 Skill，其余 item 继续 JSON 编译。
+
+`write_production_index` 成功表示便携产物已写入。任务要求进入模板数据看板时，还需由本地数据台完成真实读回：
+
+- runtime root 位于或已登记到正式扫描范围；
+- 最新 revision 被采用；
+- 来源素材、Approved Template Image 和正式 JSON 均可解析；
+- 专题下唯一 item/key 数与生产账本一致；
+- 缺失产物、重复 key 和错误 URI 为零。
+
+完成真实读回后才报告“看板可见”。本地数据台不可用时，报告“便携交付完成、看板读回待执行”，并给出 `production-index.json` 入口。
+
 正式 `<key>.json` 不包含顶层 `id`、sidecar、receipt、审核、路径、API 响应或运行状态。顶层模板 `id` 只由后端入库生成；已上线数据从管理台导出时可能带有该字段，不能据此写回生产交付。`inputSchema.slots[].id` 与 `runtimeSemantics.targetInstances[].id` 是模板内部绑定标识，继续保留。删除 sidecar 不改变已交付 JSON 的运行语义。

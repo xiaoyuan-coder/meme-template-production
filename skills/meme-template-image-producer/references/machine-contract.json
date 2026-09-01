@@ -1,5 +1,5 @@
 {
-  "contractVersion": 4,
+  "contractVersion": 6,
   "replacementRequired": true,
   "provider": "fal",
   "providerEnvironment": {"credential": "FAL_KEY", "adapterFactory": "create_fal_adapter_from_environment"},
@@ -26,9 +26,26 @@
   ],
   "replacement": {
     "categories": [
-      "ordinary_person", "public_figure", "anime_ip", "historical_figure",
+      "ordinary_person", "public_figure", "original_character", "anime_ip", "historical_figure",
       "cat", "dog", "other_animal", "object", "food", "scene", "text"
     ],
+    "fixedCategoryRoutes": {
+      "ordinary_person": ["ordinary_person"],
+      "public_figure": ["ordinary_person"],
+      "original_character": ["original_character"],
+      "anime_ip": ["anime_ip"],
+      "historical_figure": ["historical_figure"],
+      "cat": ["cat"],
+      "dog": ["dog"]
+    },
+    "humanIdentityReplacement": {
+      "sourceCategories": ["ordinary_person", "public_figure"],
+      "selectedCategory": "ordinary_person",
+      "identityOrigin": "ai_generated",
+      "identityTextActions": ["remove", "replace"],
+      "genericTextFlag": "genericAttribute",
+      "genericTextReasonField": "neutralizationReason"
+    },
     "operations": [
       "identity_replace", "scene_replace", "mask_fill", "content_replace", "ordered_set"
     ],
@@ -53,7 +70,8 @@
       "output": "输出"
     },
     "requiredVisualFeatures": [
-      "medium", "composition", "proportions", "colorAndLight", "surface", "visualHook"
+      "medium", "composition", "proportions", "colorAndLight", "surface", "visualHook",
+      "intentionalImperfections"
     ],
     "featureAuthorities": [
       "target_identity", "template_mechanism", "derived_consistency"

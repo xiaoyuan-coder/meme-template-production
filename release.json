@@ -1,8 +1,8 @@
 {
-  "releaseVersion": "0.5.0",
+  "releaseVersion": "0.7.0",
   "skills": {
-    "meme-template-image-producer": "0.3.0",
-    "meme-template-json-compiler": "0.5.0"
+    "meme-template-image-producer": "0.5.0",
+    "meme-template-json-compiler": "0.6.0"
   },
   "sharedContractVersion": 2,
   "galleryContract": {

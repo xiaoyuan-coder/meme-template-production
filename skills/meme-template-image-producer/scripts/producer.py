@@ -376,6 +376,12 @@ def _non_empty_text(value: Any, field: str) -> str:
     return value.strip()
 
 
+def _flatten_prompt_value(value: Any) -> str:
+    if isinstance(value, list):
+        return "；".join(_non_empty_text(item, "prompt value") for item in value)
+    return _non_empty_text(value, "prompt value")
+
+
 def compile_replacement_prompt(prompt_sections: Mapping[str, Any]) -> str:
     """Compile the approved, structured strategy prompt in one canonical order."""
 
@@ -388,9 +394,9 @@ def compile_replacement_prompt(prompt_sections: Mapping[str, Any]) -> str:
         if isinstance(value, list):
             if not value or not all(isinstance(item, str) and item.strip() for item in value):
                 raise ContractError(f"prompt section {name} must contain non-empty text")
-            rendered = "；".join(item.strip() for item in value)
+            rendered = _flatten_prompt_value(value)
         else:
-            rendered = _non_empty_text(value, f"prompt section {name}")
+            rendered = _flatten_prompt_value(value)
         lines.append(f"{replacement['promptLabels'][name]}：{rendered}")
     return "\n".join(lines)
 
@@ -414,13 +420,21 @@ def _validate_category_continuity(strategy: Mapping[str, Any]) -> None:
     selected = strategy.get("selectedCategory")
     if source not in replacement["categories"] or selected not in replacement["categories"]:
         raise ContractError("replacement category is outside the contract")
-    if source != selected and not _non_empty_text(
+    fixed_routes = replacement["fixedCategoryRoutes"]
+    if source in fixed_routes:
+        if selected not in fixed_routes[source]:
+            raise ContractError("replacement category violates the fixed source route")
+    elif source != selected and not _non_empty_text(
         strategy.get("crossCategoryMechanism"), "crossCategoryMechanism"
     ):
         raise ContractError("cross-category replacement requires an explicit visual mechanism")
-    if source in {"ordinary_person", "public_figure", "anime_ip", "historical_figure", "cat", "dog"}:
-        if source != selected:
-            raise ContractError("identity and species categories must remain compatible")
+    human_route = replacement["humanIdentityReplacement"]
+    if source in human_route["sourceCategories"]:
+        if (
+            selected != human_route["selectedCategory"]
+            or strategy.get("replacementIdentityOrigin") != human_route["identityOrigin"]
+        ):
+            raise ContractError("real-person replacement must use an AI-generated new person")
     source_identity = _non_empty_text(strategy.get("sourceIdentityFingerprint"), "sourceIdentityFingerprint")
     selected_identity = _non_empty_text(strategy.get("selectedIdentityFingerprint"), "selectedIdentityFingerprint")
     if source_identity == selected_identity:
@@ -584,6 +598,8 @@ def _validate_identity_groups(strategy: Mapping[str, Any]) -> None:
 
 def _validate_region_actions(strategy: Mapping[str, Any]) -> None:
     replacement = _contract()["replacement"]
+    human_route = replacement["humanIdentityReplacement"]
+    human_source = strategy.get("sourceCategory") in human_route["sourceCategories"]
     mark_actions = strategy.get("markActions")
     text_actions = strategy.get("textActions")
     if not isinstance(mark_actions, list) or not isinstance(text_actions, list):
@@ -610,7 +626,16 @@ def _validate_region_actions(strategy: Mapping[str, Any]) -> None:
             raise ContractError("text action is duplicated or invalid")
         if role in {"watermark", "attribution"} and action != "remove":
             raise ContractError("watermark and attribution text must be removed")
-        if role == "identity" and action not in {"synchronize_identity", "remove"}:
+        if role == "identity" and human_source:
+            if action not in human_route["identityTextActions"]:
+                raise ContractError("real-person identity text must be removed or neutralized")
+            if action == "replace":
+                flag = human_route["genericTextFlag"]
+                reason_field = human_route["genericTextReasonField"]
+                if region.get(flag) is not True:
+                    raise ContractError("neutralized real-person text must declare a generic attribute")
+                _non_empty_text(region.get(reason_field), reason_field)
+        elif role == "identity" and action not in {"synchronize_identity", "remove"}:
             raise ContractError("identity text must synchronize or be removed")
         if role in {"joke", "content"} and action != "preserve":
             if not region.get("explicitlyAuthorized") and not region.get("mechanismRequiresRewrite"):
@@ -702,6 +727,9 @@ def _validate_operations_and_visuals(strategy: Mapping[str, Any]) -> None:
         raise ContractError("visualFeatures are incomplete")
     for name in replacement["requiredVisualFeatures"]:
         _non_empty_text(features[name], f"visualFeatures.{name}")
+    prompt_visual_features = _flatten_prompt_value(strategy.get("promptSections", {}).get("visualFeatures"))
+    if features["intentionalImperfections"] not in prompt_visual_features:
+        raise ContractError("intentional imperfections must reach the compiled visual-features prompt")
     if not isinstance(strategy.get("frozenSet"), list) or not strategy["frozenSet"]:
         raise ContractError("frozenSet must be non-empty")
     if not isinstance(strategy.get("spatialRelations"), list):
@@ -800,6 +828,7 @@ def build_strategy_review_package(strategy: Mapping[str, Any]) -> dict[str, Any]
         "categoryContinuity": {
             "sourceCategory": strategy["sourceCategory"],
             "selectedCategory": strategy["selectedCategory"],
+            "replacementIdentityOrigin": strategy.get("replacementIdentityOrigin"),
             "crossCategoryMechanism": strategy.get("crossCategoryMechanism"),
         },
         "identityResearch": dict(strategy["identityResearch"]),
@@ -816,6 +845,7 @@ def build_strategy_review_package(strategy: Mapping[str, Any]) -> dict[str, Any]
         "targetCanvas": dict(strategy["targetCanvas"]),
         "frozenSet": list(strategy["frozenSet"]),
         "mechanismAnalysis": json.loads(json.dumps(strategy["mechanismAnalysis"], ensure_ascii=False)),
+        "visualFeatures": json.loads(json.dumps(strategy["visualFeatures"], ensure_ascii=False)),
         "risks": deepcopy_list(strategy["risks"]),
         "promptSections": dict(strategy["promptSections"]),
         "prompt": strategy["prompt"],

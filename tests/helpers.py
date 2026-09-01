@@ -109,7 +109,7 @@ def valid_strategy(producer_module, *, item_id: str = "item-a", revision: int = 
         "canvas": "保持完整正方形场景与当前裁切",
         "markPolicy": "删除右下角作者水印，保留猫旁的装饰星星贴纸",
         "frozenSet": ["保持拥抱动作、中心构图、温暖手绘媒介和原文笑点"],
-        "visualFeatures": "温暖手绘插画，简洁线条，柔和暖色光，中央拥抱钩子",
+        "visualFeatures": "温暖手绘插画，简洁线条，柔和暖色光，中央拥抱钩子；未观察到有价值的刻意缺陷",
         "residualCleanup": "清除旧猫的脸、身体、毛色、项圈、影子和水印残留",
         "spatialRelations": "保持双臂拥抱接触、前后遮挡和四肢解剖",
         "output": "一张 1024x1024 PNG，完整画布，不增加额外文字",
@@ -215,6 +215,7 @@ def valid_strategy(producer_module, *, item_id: str = "item-a", revision: int = 
             "colorAndLight": "柔和暖色光",
             "surface": "纸面纹理",
             "visualHook": "双臂拥抱猫咪",
+            "intentionalImperfections": "未观察到有价值的刻意缺陷",
         },
         "spatialRelations": ["hug-contact", "front-occlusion"],
         "risks": [{"code": "CONTACT_COMPLEX", "summary": "需要复核拥抱接触"}],
@@ -236,7 +237,7 @@ def valid_approved_analysis(image_sha: str) -> dict:
         draft, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")).hexdigest()
     return {
-        "schemaVersion": 3,
+        "schemaVersion": 4,
         "approvedImageSha256": image_sha,
         "visualMechanism": "中央主体紧抱宠物的温暖手绘场景",
         "templateValue": {
@@ -408,7 +409,7 @@ def valid_approved_analysis(image_sha: str) -> dict:
             "status": "PASS",
             "reviewedDraftSha256": draft_sha,
             "checks": {
-                check: True for check in (
+                check: {"passed": True, "evidence": [f"fixture:{check}"]} for check in (
                     "templateValueFocused", "playHypothesisGrounded", "slotRecallComplete",
                     "slotPrecisionComplete", "semanticUnitsCoherent", "slotScopeMinimal", "imageModesJustified",
                     "groupPolicyJustified", "featureAuthorityComplete", "textRoutingComplete",

@@ -20,3 +20,16 @@
 `production-index.json` 遵循 bundled `production-index.schema.json`。每次进入策略审核、图片审核、上传或已完成状态时，通过 `write_production_index` 原子合并当前 `(skill,itemId,revision)`。产物引用使用 `artifact://` 或 `sidecar://`，由个人数据台映射到自身存储。个人数据台的页面、数据库、机器人、路径和业务索引不进入本 Skill。
 
 多样性报告覆盖完整生产任务，并在任何单项策略编译前生成。可避免的集中项先重新分配候选，再形成对话框策略表。两个人工点均按分片集中展示：策略点是一张替换表，成图点是前后缩略图表；回复可以批准全部或排除 item ID。对话框决策落成逐项审批事实，便于单项恢复。
+
+## 恢复路由
+
+对话内容用于交互，持久化 item 状态、审批 SHA、Approved Template Image envelope 和 OSS receipt 才是续跑依据。恢复任务时逐项选择唯一下一步：
+
+- 已有新鲜策略批准且尚未提交：继续一次 FAL 请求。
+- 已有 provider 请求或未知提交：先恢复或对账该请求。
+- 已有成图且等待人工决定：回到第二人工点。
+- 已有人类图片批准：立即上传；已有匹配 receipt 和 `approved_uploaded` envelope 时直接交给 JSON Skill。
+- JSON-only 修订：复用现有 envelope，全程留在 JSON Skill。
+- 只有图片被明确退回的 item 创建新图片 revision；同批已批准 item 保持原状态。
+
+任务级“全部批准”必须展开为当前审核清单内逐 item 的不可变批准事实。暂停、误发停止、换任务或重新打开对话后，从这些事实恢复，不能凭最近一条自然语言消息回退整批阶段。

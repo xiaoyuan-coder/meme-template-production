@@ -2,6 +2,8 @@
 
 Strategy and image reviews are separate human decisions shown in the Codex conversation. Strategy rows form a compact replacement table; image rows pair before/after thumbnails. Both support “approve all” or “exclude item IDs,” then persist item-level `reviewerRef`, `decidedAt`, object SHA, `ruleVersion`, and `revision`. Strategy approval additionally binds source/input image SHA, exact input URI digest, strategy SHA, and prompt SHA. Image approval binds the image SHA and complete review-package SHA. A changed object, input, rule, or revision invalidates the prior decision. Existing machine findings remain advisory evidence and never replace the human decision.
 
+The strategy review package exposes `visualFeatures`, including `intentionalImperfections`, so roughness and other value-bearing defects are visible before the paid request. The image review compares subject and object counts, readable text, layout anchors, medium traits, and intentional imperfections against the approved strategy. File, hash, dimension, or schema validity alone never proves visual fidelity.
+
 After rejection, the next revision shows the immediately previous generated image, reason codes, human note, time, revision, previous review SHA, and the current correction treatment as a read-only comparison. Full earlier history is available in a collapsed section. Previous reasons feed the structured correction plan and prompt, while the new image receives an independent review and no inherited verdict.
 
 Classify outcomes as `visual_rejection`, `strategy_rejection`, `technical_failure`, or `cost_api_failure`. Bind the current review to the current image SHA. Refer to the previous decision through `previousVisualReviewSha256`; do not mutate prior review facts.

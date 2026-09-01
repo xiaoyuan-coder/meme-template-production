@@ -496,6 +496,83 @@ class ImageProducerTests(unittest.TestCase):
         with self.assertRaises(producer.ContractError):
             producer.validate_replacement_strategy(blanket_cleanup)
 
+    def test_real_people_require_ai_identity_and_generic_identity_text(self):
+        strategy = valid_strategy(producer)
+        strategy.update({
+            "sourceCategory": "public_figure",
+            "selectedCategory": "ordinary_person",
+            "replacementIdentityOrigin": "ai_generated",
+            "replacementValue": "AI-generated adult woman",
+            "sourceIdentityFingerprint": "source-public-figure",
+            "selectedIdentityFingerprint": "ai-generated-woman-001",
+            "identityResearch": {
+                "required": True,
+                "conclusion": "来源主体为现实公众人物，替换路线因此进入匿名 AI 新真人",
+                "confidence": 0.99,
+                "evidenceRefs": ["fixture://identity-evidence"],
+                "alternatives": [],
+            },
+            "textActions": [{
+                "regionId": "identity-title",
+                "role": "identity",
+                "action": "replace",
+                "exactText": "MUSE",
+                "genericAttribute": True,
+                "neutralizationReason": "使用通用属性文字解除现实人物身份绑定",
+            }],
+        })
+        continuity = strategy["subjectContinuityEvidence"][0]
+        continuity["source"]["category"] = "public_figure"
+        continuity["target"]["category"] = "ordinary_person"
+        producer.validate_replacement_strategy(strategy)
+
+        package = producer.build_strategy_review_package(strategy)
+        self.assertEqual(
+            package["categoryContinuity"]["replacementIdentityOrigin"],
+            "ai_generated",
+        )
+
+        public_to_public = copy.deepcopy(strategy)
+        public_to_public["selectedCategory"] = "public_figure"
+        public_to_public["subjectContinuityEvidence"][0]["target"]["category"] = "public_figure"
+        with self.assertRaises(producer.ContractError):
+            producer.validate_replacement_strategy(public_to_public)
+
+        missing_ai_origin = copy.deepcopy(strategy)
+        missing_ai_origin.pop("replacementIdentityOrigin")
+        with self.assertRaises(producer.ContractError):
+            producer.validate_replacement_strategy(missing_ai_origin)
+
+        named_identity_sync = copy.deepcopy(strategy)
+        named_identity_sync["textActions"][0] = {
+            "regionId": "identity-title",
+            "role": "identity",
+            "action": "synchronize_identity",
+            "exactText": "REAL PERSON NAME",
+        }
+        with self.assertRaises(producer.ContractError):
+            producer.validate_replacement_strategy(named_identity_sync)
+
+        unproven_generic_text = copy.deepcopy(strategy)
+        unproven_generic_text["textActions"][0].pop("genericAttribute")
+        with self.assertRaises(producer.ContractError):
+            producer.validate_replacement_strategy(unproven_generic_text)
+
+        missing_reason = copy.deepcopy(strategy)
+        missing_reason["textActions"][0].pop("neutralizationReason")
+        with self.assertRaises(producer.ContractError):
+            producer.validate_replacement_strategy(missing_reason)
+
+        ordinary_person = copy.deepcopy(strategy)
+        ordinary_person["sourceCategory"] = "ordinary_person"
+        ordinary_person["subjectContinuityEvidence"][0]["source"]["category"] = "ordinary_person"
+        ordinary_person["textActions"][0] = {
+            "regionId": "identity-title",
+            "role": "identity",
+            "action": "remove",
+        }
+        producer.validate_replacement_strategy(ordinary_person)
+
     def test_feature_authority_separates_redraw_scope_from_semantic_change(self):
         strategy = valid_strategy(producer)
         strategy["featureAuthority"][0] = {
@@ -531,6 +608,10 @@ class ImageProducerTests(unittest.TestCase):
         package = producer.build_strategy_review_package(strategy)
         self.assertEqual(package["state"], "awaiting_strategy_approval")
         self.assertEqual(package["expectedFalCalls"], 1)
+        self.assertEqual(
+            package["visualFeatures"]["intentionalImperfections"],
+            "未观察到有价值的刻意缺陷",
+        )
         self.assertEqual(strategy["prompt"].count("任务："), 1)
         self.assertEqual(strategy["prompt"].count("特征归属："), 1)
         changed = copy.deepcopy(strategy)
@@ -538,6 +619,30 @@ class ImageProducerTests(unittest.TestCase):
         with self.assertRaises(producer.ContractError):
             producer.validate_replacement_strategy(changed)
         self.assertEqual(producer.select_image_size(1600, 900), "1344x768")
+
+        missing_imperfections = copy.deepcopy(strategy)
+        missing_imperfections["visualFeatures"].pop("intentionalImperfections")
+        with self.assertRaisesRegex(producer.ContractError, "incomplete"):
+            producer.validate_replacement_strategy(missing_imperfections)
+
+    def test_original_illustration_cannot_be_promoted_to_anime_ip(self):
+        strategy = valid_strategy(producer)
+        strategy.update({
+            "sourceCategory": "original_character",
+            "selectedCategory": "original_character",
+            "sourceIdentityFingerprint": "original-student-a",
+            "selectedIdentityFingerprint": "original-student-b",
+        })
+        strategy["subjectContinuityEvidence"][0]["source"]["category"] = "original_character"
+        strategy["subjectContinuityEvidence"][0]["target"]["category"] = "original_character"
+        producer.validate_replacement_strategy(strategy)
+
+        promoted = copy.deepcopy(strategy)
+        promoted["selectedCategory"] = "anime_ip"
+        promoted["selectedIdentityFingerprint"] = "franchise::famous-character"
+        promoted["subjectContinuityEvidence"][0]["target"]["category"] = "anime_ip"
+        with self.assertRaisesRegex(producer.ContractError, "fixed source route"):
+            producer.validate_replacement_strategy(promoted)
 
     def test_review_packages_validate_against_bundled_schemas(self):
         strategy_package = producer.build_strategy_review_package(valid_strategy(producer))

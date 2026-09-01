@@ -347,8 +347,8 @@ def validate_approved_image_analysis(
             f"approved image analysis fields mismatch; missing={sorted(required - analysis.keys())}, "
             f"extra={sorted(analysis.keys() - allowed)}"
         )
-    if analysis["schemaVersion"] != 3:
-        raise ContractError("approved image analysis schemaVersion must be 3")
+    if analysis["schemaVersion"] != 4:
+        raise ContractError("approved image analysis schemaVersion must be 4")
     if analysis["approvedImageSha256"] != approved_image["image"]["sha256"]:
         raise ContractError("approved image analysis belongs to another image")
     _non_empty_text(analysis["visualMechanism"], "visualMechanism")
@@ -605,6 +605,70 @@ def _validate_text_regions(regions: Sequence[Mapping[str, Any]]) -> None:
         semantic_units[semantic_unit_id] = signature
 
 
+def _validate_quick_text_slot_lengths(
+    slots: Sequence[Mapping[str, Any]],
+    text_regions: Sequence[Mapping[str, Any]],
+    limits: Mapping[str, Any],
+) -> None:
+    """Keep high-value text controls compact while leaving other slot axes unaffected."""
+
+    text_slot_ids = {
+        region.get("slotId")
+        for region in text_regions
+        if region.get("action") == "open_slot"
+    }
+    for slot in slots:
+        if slot.get("id") not in text_slot_ids:
+            continue
+        text_mode = slot.get("text")
+        if not isinstance(text_mode, Mapping):
+            raise ContractError("quick text slots require text input")
+        values = [text_mode.get("defaultValue"), *text_mode.get("suggestions", [])]
+        for value in values:
+            if not isinstance(value, str) or not value.strip():
+                raise ContractError("quick text values must be non-empty strings")
+            normalized = value.strip()
+            if re.search(r"\s", normalized):
+                if (
+                    len(normalized.split()) > limits["maxWhitespaceTokens"]
+                    or len(normalized) > limits["maxTotalCharacters"]
+                ):
+                    raise ContractError("quick text exceeds the whitespace-token length limit")
+            elif len(normalized) > limits["maxContinuousCharacters"]:
+                raise ContractError("quick text exceeds the continuous-character length limit")
+
+
+def _validate_self_review(
+    self_review: Any,
+    required_checks: set[str],
+    formal_draft: Mapping[str, Any],
+) -> None:
+    if (
+        not isinstance(self_review, Mapping)
+        or set(self_review) != {
+            "status", "reviewedDraftSha256", "checks", "issuesFound", "revisionsApplied"
+        }
+        or self_review.get("status") != "PASS"
+        or self_review.get("reviewedDraftSha256") != sha256_json(formal_draft)
+        or not isinstance(self_review.get("checks"), Mapping)
+        or set(self_review["checks"]) != required_checks
+        or not isinstance(self_review.get("issuesFound"), list)
+        or self_review["issuesFound"]
+        or not isinstance(self_review.get("revisionsApplied"), list)
+    ):
+        raise ContractError("a fresh passing self-review must bind the final formal draft")
+    for check_name, result in self_review["checks"].items():
+        if (
+            not isinstance(result, Mapping)
+            or set(result) != {"passed", "evidence"}
+            or result.get("passed") is not True
+            or not isinstance(result.get("evidence"), list)
+            or not result["evidence"]
+            or not all(isinstance(item, str) and item.strip() for item in result["evidence"])
+        ):
+            raise ContractError(f"self-review check {check_name} requires concrete evidence")
+
+
 def validate_authoring_contract(
     analysis: Mapping[str, Any], formal_draft: Mapping[str, Any], approved_image: Mapping[str, Any]
 ) -> None:
@@ -650,6 +714,9 @@ def validate_authoring_contract(
     slot_ids = [slot.get("id") for slot in slots]
     if any(not isinstance(slot_id, str) or not slot_id for slot_id in slot_ids) or len(set(slot_ids)) != len(slot_ids):
         raise ContractError("slot IDs must be unique and non-empty")
+    _validate_quick_text_slot_lengths(
+        slots, analysis["textRegions"], authoring["quickTextLimits"]
+    )
     core_decisions = analysis["playDecisionModel"]["coreUserDecisions"]
     decision_slot_ids = [decision["slotId"] for decision in core_decisions]
     if len(set(decision_slot_ids)) != len(decision_slot_ids) or set(decision_slot_ids) != set(slot_ids):
@@ -998,23 +1065,9 @@ def validate_authoring_contract(
                 raise ContractError(f"visualContract locks back an open value from {slot_id}")
             if fact in title or fact in tags:
                 raise ContractError(f"title or tags lock back an open value from {slot_id}")
-    self_review = analysis["selfReview"]
-    required_checks = set(authoring["selfReviewChecks"])
-    if (
-        not isinstance(self_review, Mapping)
-        or set(self_review) != {
-            "status", "reviewedDraftSha256", "checks", "issuesFound", "revisionsApplied"
-        }
-        or self_review.get("status") != "PASS"
-        or self_review.get("reviewedDraftSha256") != sha256_json(formal_draft)
-        or not isinstance(self_review.get("checks"), Mapping)
-        or set(self_review["checks"]) != required_checks
-        or any(value is not True for value in self_review["checks"].values())
-        or not isinstance(self_review.get("issuesFound"), list)
-        or self_review["issuesFound"]
-        or not isinstance(self_review.get("revisionsApplied"), list)
-    ):
-        raise ContractError("a fresh passing self-review must bind the final formal draft")
+    _validate_self_review(
+        analysis["selfReview"], set(authoring["selfReviewChecks"]), formal_draft
+    )
 
 
 def validate_formal_json(formal: Mapping[str, Any]) -> None:
