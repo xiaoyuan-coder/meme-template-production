@@ -1,5 +1,13 @@
 {
-  "contractVersion": 4,
+  "contractVersion": 5,
+  "deliveryReadback": {
+    "surfaceFields": {
+      "list": ["key", "title", "description", "cover"],
+      "detail": ["*"],
+      "editPreview": ["key", "promptTemplate", "inputSchema", "preprocessSteps", "runtimeSemantics", "referenceImage"],
+      "export": ["*"]
+    }
+  },
   "keyPattern": "^[a-z][a-z0-9-]{1,59}$",
   "keyDecisions": [
     "NEW",

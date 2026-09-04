@@ -8,6 +8,7 @@ import os
 import re
 import tempfile
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from urllib.parse import urljoin, urlparse
@@ -1163,6 +1164,146 @@ def compile_final_json(
     formal = project_formal_json(formal_draft, approved_image)
     validate_formal_json(formal)
     return formal
+
+
+def _changed_field_paths(before: Any, after: Any, path: str = "") -> set[str]:
+    """Compare object leaves; arrays are one ordered value (JSON Pointer paths)."""
+    if isinstance(before, Mapping) and isinstance(after, Mapping):
+        changed: set[str] = set()
+        for key in before.keys() | after.keys():
+            child = path + "/" + key.replace("~", "~0").replace("/", "~1")
+            if key not in before or key not in after:
+                changed.add(child)
+            else:
+                changed.update(_changed_field_paths(before[key], after[key], child))
+        return changed
+    return set() if before == after else {path}
+
+
+def validate_revision_scope(
+    previous_formal: Mapping[str, Any],
+    revised_formal: Mapping[str, Any],
+    scope: Mapping[str, Any],
+) -> None:
+    """Reject changes outside a request-derived scope bound to the prior delivery."""
+    validate_formal_json(previous_formal)
+    validate_formal_json(revised_formal)
+    if not isinstance(scope, Mapping) or set(scope) != {
+        "previousFormalSha256", "requestEvidence", "addedSlotIds",
+        "removedSlotIds", "modifiedSlotIds", "changedFieldPaths",
+    }:
+        raise ContractError("revision scope fields are incomplete")
+    if scope["previousFormalSha256"] != sha256_json(previous_formal):
+        raise ContractError("revision scope belongs to another previous delivery")
+    for field in ("requestEvidence", "addedSlotIds", "removedSlotIds", "modifiedSlotIds", "changedFieldPaths"):
+        values = scope[field]
+        if not isinstance(values, list) or any(not isinstance(v, str) or not v.strip() for v in values):
+            raise ContractError("revision scope requires text lists")
+        if len(values) != len(set(values)):
+            raise ContractError("revision scope lists must be unique")
+    if not scope["requestEvidence"]:
+        raise ContractError("revision scope requires the user request evidence")
+    for field in ("key", "cover", "referenceImage"):
+        if previous_formal[field] != revised_formal[field]:
+            raise ContractError("JSON-only revision must preserve key and approved image URLs")
+
+    before = deepcopy(dict(previous_formal))
+    after = deepcopy(dict(revised_formal))
+    old_list = before["inputSchema"].pop("slots")
+    new_list = after["inputSchema"].pop("slots")
+    old_slots = {slot["id"]: slot for slot in old_list}
+    new_slots = {slot["id"]: slot for slot in new_list}
+    if len(old_slots) != len(old_list) or len(new_slots) != len(new_list):
+        raise ContractError("revision slot IDs must be unique")
+    old_bindings = before["runtimeSemantics"].pop("inputBindings")
+    new_bindings = after["runtimeSemantics"].pop("inputBindings")
+    if set(old_bindings) != set(old_slots) or set(new_bindings) != set(new_slots):
+        raise ContractError("revision bindings must match slot IDs")
+    common = old_slots.keys() & new_slots.keys()
+    if [s["id"] for s in old_list if s["id"] in common] != [s["id"] for s in new_list if s["id"] in common]:
+        raise ContractError("JSON-only revisions preserve surviving slot order")
+    expected = {
+        "addedSlotIds": new_slots.keys() - old_slots.keys(),
+        "removedSlotIds": old_slots.keys() - new_slots.keys(),
+        "modifiedSlotIds": {
+            key for key in common
+            if old_slots[key] != new_slots[key] or old_bindings[key] != new_bindings[key]
+        },
+        "changedFieldPaths": _changed_field_paths(before, after),
+    }
+    for field, actual in expected.items():
+        if set(scope[field]) != actual:
+            raise ContractError(f"revision changes differ from declared {field}")
+
+
+def compile_json_revision(
+    previous_formal: Mapping[str, Any],
+    scope: Mapping[str, Any],
+    approved_image: Mapping[str, Any],
+    analysis: Mapping[str, Any],
+    formal_draft: Mapping[str, Any],
+    registry_response: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Compile and check a JSON-only revision before any delivery write."""
+    if registry_response.get("decision") != "EXISTING_SAME_SOURCE":
+        raise ContractError("JSON-only revision requires an existing source identity")
+    revised = compile_final_json(approved_image, analysis, formal_draft, registry_response)
+    validate_revision_scope(previous_formal, revised, scope)
+    return revised
+
+
+def validate_delivery_readback(
+    formal: Mapping[str, Any],
+    delivery_identity: Mapping[str, Any],
+    observations: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate externally collected workbench observations; perform no UI or API I/O."""
+    validate_formal_json(formal)
+    if not isinstance(delivery_identity, Mapping) or set(delivery_identity) != {
+        "key", "chainId", "revision", "formalJsonRef", "formalJsonSha256",
+    }:
+        raise ContractError("delivery identity fields are incomplete")
+    if delivery_identity["key"] != formal["key"] or delivery_identity["formalJsonSha256"] != sha256_json(formal):
+        raise ContractError("delivery identity does not match the formal JSON")
+    _non_empty_text(delivery_identity["chainId"], "chainId")
+    revision = delivery_identity["revision"]
+    if type(revision) is not int or revision < 1:
+        raise ContractError("delivery revision must be a positive integer")
+    if not isinstance(delivery_identity["formalJsonRef"], str) or not re.fullmatch(
+        r"(?:artifact|delivery)://\S+", delivery_identity["formalJsonRef"]
+    ):
+        raise ContractError("delivery requires a portable formal JSON reference")
+    surfaces = _contract()["deliveryReadback"]["surfaceFields"]
+    if not isinstance(observations, Mapping) or set(observations) != set(surfaces):
+        raise ContractError("readback requires every workbench surface")
+    for surface, fields in surfaces.items():
+        observation = observations[surface]
+        if not isinstance(observation, Mapping) or set(observation) != {
+            "deliveryIdentity", "observedAt", "evidenceRefs", "content",
+        }:
+            raise ContractError("readback observation fields are incomplete")
+        if sha256_json(observation["deliveryIdentity"]) != sha256_json(delivery_identity):
+            raise ContractError(f"{surface} readback uses another delivery revision")
+        expected = dict(formal) if fields == ["*"] else {
+            field: formal[field] for field in fields if field in formal
+        }
+        if sha256_json(observation["content"]) != sha256_json(expected):
+            raise ContractError(f"{surface} readback content is stale or mixed")
+        evidence = observation["evidenceRefs"]
+        if not isinstance(evidence, list) or not evidence or any(not isinstance(v, str) or not v.strip() for v in evidence):
+            raise ContractError("readback requires observed evidence references")
+        observed_at = observation["observedAt"]
+        try:
+            parsed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        except (AttributeError, TypeError, ValueError):
+            raise ContractError("readback requires an ISO-8601 observation time") from None
+        if parsed.utcoffset() is None:
+            raise ContractError("readback observation time requires a timezone")
+    return {
+        "status": "verified_against_delivery",
+        "deliveryIdentity": deepcopy(dict(delivery_identity)),
+        "observations": deepcopy(dict(observations)),
+    }
 
 
 def _validate_registry_response(response: Mapping[str, Any]) -> None:

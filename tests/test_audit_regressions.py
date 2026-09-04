@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -729,14 +731,35 @@ class AuditRegressionTests(unittest.TestCase):
             stale.pop("reviewerRef")
             self.assertTrue(list(Draft202012Validator(schema).iter_errors(stale)))
 
-    def test_formal_release_build_fails_closed_in_current_unborn_dirty_repo(self):
+    def test_formal_release_uses_isolated_git_states(self):
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaises(release_tools.ReleaseError):
-                release_tools.build_skill_package(
-                    ROOT, "meme-template-image-producer", Path(directory)
+            root = Path(directory)
+            repo = root / "source"
+            repo.mkdir()
+            shutil.copy2(ROOT / "release.json", repo / "release.json")
+            shutil.copytree(ROOT / "skills", repo / "skills", ignore=shutil.ignore_patterns("__pycache__"))
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", *args], cwd=repo, check=True, capture_output=True, text=True
                 )
+
+            git("init")
+            output = root / "packages"
+            skill = "meme-template-image-producer"
+            with self.assertRaises(release_tools.ReleaseError):
+                release_tools.build_skill_package(repo, skill, output)
+            git("add", ".")
+            git("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "fixture")
+            package, _ = release_tools.build_skill_package(repo, skill, output)
+            manifest, _ = release_tools._read_package(package)
+            self.assertNotIn("maintenanceOnly", manifest)
+            (repo / "release.json").write_text((repo / "release.json").read_text() + "\n")
+            with self.assertRaises(release_tools.ReleaseError):
+                release_tools.build_skill_package(repo, skill, output)
             package, _ = release_tools.build_skill_package(
-                ROOT, "meme-template-image-producer", Path(directory), allow_uncommitted=True
+                repo, skill, output / "maintenance", allow_uncommitted=True
             )
             manifest, _ = release_tools._read_package(package)
             self.assertTrue(manifest["maintenanceOnly"])
