@@ -1,14 +1,15 @@
 {
-  "releaseVersion": "0.8.1",
+  "releaseVersion": "0.9.0",
   "skills": {
     "meme-template-image-producer": "0.8.1",
-    "meme-template-json-compiler": "0.8.1"
+    "meme-template-json-compiler": "0.9.0",
+    "template-atmosphere-image-producer": "0.1.0"
   },
-  "sharedContractVersion": 2,
+  "sharedContractVersion": 3,
   "galleryContract": {
-    "identity": "agent-template-json-runtime-contract-2026-08-26",
-    "relativePath": "contracts/upstream/gallery-template/agent-template-json-runtime-contract-2026-08-26/gallery-template.schema.json",
-    "sha256": "317ed2444a8109722fd6bdafd00c1f43b66b59096aea8b29d6aecfb2a542f608",
+    "identity": "agent-template-json-runtime-contract-2026-09-06",
+    "relativePath": "contracts/upstream/gallery-template/agent-template-json-runtime-contract-2026-09-06/gallery-template.schema.json",
+    "sha256": "40b7553300a16df28a83dfe8b2edf414b397c3902754a5aaddf95cf1cb4025bd",
     "productionInputSchemaVersion": 2,
     "productionRuntimeSemanticsVersion": 2
   }

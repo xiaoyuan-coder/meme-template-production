@@ -43,6 +43,26 @@ class DeliveryRevisionTests(unittest.TestCase):
         with self.assertRaises(compiler.ContractError):
             compiler.compile_json_revision(self.previous, self.scope, self.envelope, analysis, draft, dict(registry, decision="NEW"))
 
+    def test_json_revision_preserves_backfilled_atmosphere_url(self):
+        self.previous["imageUrl"] = (
+            "https://assets.memebuy.cn/memebuy/template-atmosphere/sha256/"
+            + "a" * 64
+            + ".png"
+        )
+        self.scope["previousFormalSha256"] = compiler.sha256_json(self.previous)
+        draft = copy.deepcopy(self.draft)
+        draft["title"] = "抱紧你的毛孩子"
+        analysis = valid_approved_analysis(self.envelope["image"]["sha256"])
+        analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
+        registry = {
+            "registryRevision": "r2", "decision": "EXISTING_SAME_SOURCE",
+            "resolvedKey": draft["key"], "matchedBy": ["canonicalSourceIdentity"], "evidence": [],
+        }
+        revised = compiler.compile_json_revision(
+            self.previous, self.scope, self.envelope, analysis, draft, registry
+        )
+        self.assertEqual(revised["imageUrl"], self.previous["imageUrl"])
+
     def test_title_revision_rejects_unrequested_slot_binding_and_topology_changes(self):
         mutations = [
             lambda value: value["inputSchema"]["slots"][0]["text"].update(suggestions=["白猫", "黑猫", "灰猫"]),

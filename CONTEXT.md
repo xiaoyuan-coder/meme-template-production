@@ -4,9 +4,21 @@ This context turns an approved image into a reusable in-app template whose edita
 
 ## Language
 
+**Original Template Creation**:
+The creation of a new reusable Template from a creative concept without requiring a supplied source image to replace.
+_Avoid_: Source-image replacement, arbitrary image generation
+
+**Template Topic**:
+A curated collection of Templates united by a clear user motivation, theme, or emotional proposition, with distinct reusable mechanisms and variations across its members.
+_Avoid_: Execution shard, arbitrary batch, one design repeated with different subjects
+
 **Template**:
 An in-app reusable image experience made of an approved template image, a user-facing Prompt Template, structured slots, and backend visual semantics.
 _Avoid_: Prompt, reference image
+
+**Atmosphere Image**:
+The single selected 3:4 lifestyle product photograph used to merchandise a Template. It is stored in the formal Template JSON as `imageUrl` after human selection and verified OSS readback.
+_Avoid_: Approved template artwork, an unreviewed candidate, a copied Good Case
 
 **Template Mechanism**:
 The stable action, relationship, layout, container, or visual joke that makes a template worth reusing after user inputs change.

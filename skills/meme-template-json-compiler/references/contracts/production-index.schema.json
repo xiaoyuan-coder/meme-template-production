@@ -16,7 +16,7 @@
         "required": ["itemId", "skill", "state", "revision", "stage", "artifacts"],
         "properties": {
           "itemId": {"type": "string", "minLength": 1},
-          "skill": {"enum": ["meme-template-image-producer", "meme-template-json-compiler"]},
+          "skill": {"enum": ["meme-template-image-producer", "meme-template-json-compiler", "template-atmosphere-image-producer"]},
           "state": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 1},
           "stage": {"type": "string", "minLength": 1},

@@ -1,10 +1,10 @@
 {
-  "contractVersion": 5,
+  "contractVersion": 6,
   "deliveryReadback": {
     "surfaceFields": {
-      "list": ["key", "title", "description", "cover"],
+      "list": ["key", "title", "description", "cover", "imageUrl"],
       "detail": ["*"],
-      "editPreview": ["key", "promptTemplate", "inputSchema", "preprocessSteps", "runtimeSemantics", "referenceImage"],
+      "editPreview": ["key", "promptTemplate", "inputSchema", "preprocessSteps", "runtimeSemantics", "referenceImage", "imageUrl"],
       "export": ["*"]
     }
   },
@@ -23,22 +23,28 @@
     "portableAdapter": "SnapshotKeyRegistryReader"
   },
   "gallery": {
-    "snapshotIdentity": "agent-template-json-runtime-contract-2026-08-26",
-    "snapshotRelativePath": "contracts/upstream/gallery-template/agent-template-json-runtime-contract-2026-08-26/gallery-template.schema.json",
+    "snapshotIdentity": "agent-template-json-runtime-contract-2026-09-06",
+    "snapshotRelativePath": "contracts/upstream/gallery-template/agent-template-json-runtime-contract-2026-09-06/gallery-template.schema.json",
     "installedSnapshotRelativePath": "references/contracts/gallery-template.schema.json",
-    "snapshotSha256": "317ed2444a8109722fd6bdafd00c1f43b66b59096aea8b29d6aecfb2a542f608",
+    "snapshotSha256": "40b7553300a16df28a83dfe8b2edf414b397c3902754a5aaddf95cf1cb4025bd",
     "inputSchemaVersion": 2,
     "runtimeSemanticsVersion": 2,
     "formalFields": [
       "key", "status", "title", "description", "imageSize", "imageN", "kind",
       "promptTemplate", "inputSchema", "preprocessSteps", "runtimeSemantics",
-      "metadata", "cover", "referenceImage"
+      "metadata", "cover", "referenceImage", "imageUrl"
     ]
   },
   "imageAsset": {
     "baseUrl": "https://assets.memebuy.cn",
     "pathPrefix": "/gallery/template-images/",
     "source": "Approved Template Image envelope v2"
+  },
+  "atmosphereImage": {
+    "baseUrl": "https://assets.memebuy.cn",
+    "pathPrefix": "/memebuy/template-atmosphere/sha256/",
+    "initialValue": null,
+    "owner": "template-atmosphere-image-producer"
   },
   "authoring": {
     "titleMaxLength": 20,

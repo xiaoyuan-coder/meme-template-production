@@ -53,9 +53,9 @@ description 使用 1–20 个中文字符，用面向用户的自然语言补充
 - 只有 `exact_content_asset` 成立时，内容槽才能增加图片输入。
 - 图片槽统一 `required=false`、`maxCount=1`、`minWidth=minHeight=256`，来源包含 `upload/recent_upload/asset_library`。同时有文字与图片时使用 `resolutionStrategy=image_over_text`。
 
-动态群组 `preserve_group` 使用文字+图片槽，并且仅在以下五项全部成立时使用：整组身份保真是玩法核心；用户自然拥有一张同框合照；人数允许变化；成员属于同一类；没有必须单独寻址的角色。家庭合照、朋友合照可满足；固定 CP、双人合照、固定家庭角色位、人与宠物混合、固定人数角色阵列均拆为独立 `one_to_one` 主体槽。双人合照的两个人分别接收单人图片，由后端重绘进同一模板关系。
+动态群组 `preserve_group` 的五项门禁及群体与独立主角并存的判断统一见 [approved-image-analysis.md](approved-image-analysis.md) 的“群组与独立角色的判定”。家庭或朋友合照可以满足门禁；固定 CP、固定家庭角色位、人与宠物组合等可寻址身份使用独立 `one_to_one`。固定双人互动分别接收两张单人图片，由后端重绘进同一模板关系。
 
-画面中有很多外观各异的猫、狗或人物时，不自动建立群组槽，也不要求用户逐个上传。优先选择最显著、最能承载玩法的一只作为身份图片槽，其余成员保持模板固定。若群体由一个类别概念共同驱动，则使用一个文字内容槽，后端保留固定数量、位置和排列；例如十二只猫占据钟表十二个位置时，允许文字改成十二只狗，同时不增加图片能力。连文字修改动机也弱时，整个群体保持固定。
+画面有很多主体时，先区分用户希望替换整组身份、仅替换焦点，还是替换一个类别概念。整组身份符合门禁时提供群体传图；仅焦点承载独立编辑动机时，可开放焦点并固定陪衬。类别概念共同驱动且数量位置确属机制时，使用文字内容槽；例如十二只猫占据钟表十二个位置时，允许文字改成十二只狗，不增加图片能力。缺少编辑动机的群体保持固定。
 
 每个 `replace_identity` binding 显式写 `clothingOwnership=source|template`。同时在 `featureAuthority` 中逐轴记录 `identity/body/ageStage/hair/clothing/accessories/expression/pose/action` 由用户图还是模板掌控，每项都要有可核对的理由。身份必须来自用户图；服装决议必须与 `clothingOwnership` 一致。模板只保留属于核心机制、构图依赖或显式转换的最小特征集。身份图的背景、构图、光线和无关道具不随上传图进入模板。详细判定见 [product-model.md](product-model.md#身份图与模板的特征权限)。
 
@@ -105,6 +105,8 @@ visualContract 约束“表现方式”和“玩法机制”，不锁回开放�
 
 每个检查项保存 `passed=true` 和可定位的 `evidence` 列表。槽位召回引用八轴审查，槽位精度引用正式 slot ID，文字路由引用 text region ID；其余检查引用对应字段或分析事实。发现问题先修改草稿再重新复核；最新草稿 SHA 的全部检查通过后直接编译并交付。自复核不调用生图 API，也不创建人工审核点。
 
-## cover、referenceImage 与 imageSize
+## cover、referenceImage、imageUrl 与 imageSize
 
 `imageSize` 精确读取 Approved Image 宽高，必须等于正式尺寸枚举之一。`cover` 与 `referenceImage` 始终相等，并逐字复用 Approved Template Image v2 已携带的 immutable OSS URL；编译器不得自行推导或改写 URL。
+
+初始正式 JSON 同时写出 `imageUrl: null`。该字段由第三个氛围图 Skill 在人工选定最终图、OSS 上传与公开读回完成后回填；普通 JSON 返修沿用当前值。

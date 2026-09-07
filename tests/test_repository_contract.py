@@ -15,10 +15,15 @@ class RepositoryContractTests(unittest.TestCase):
         json_requirements = (
             ROOT / "skills/meme-template-json-compiler/requirements.txt"
         ).read_text(encoding="utf-8").splitlines()
+        atmosphere_requirements = (
+            ROOT / "skills/template-atmosphere-image-producer/requirements.txt"
+        ).read_text(encoding="utf-8").splitlines()
         self.assertIn("fal-client>=1,<2", image_requirements)
         self.assertIn("httpx>=0.28,<1", image_requirements)
         self.assertIn("oss2>=2.19,<3", image_requirements)
         self.assertNotIn("oss2>=2.19,<3", json_requirements)
+        self.assertIn("oss2>=2.19,<3", atmosphere_requirements)
+        self.assertIn("certifi>=2025.8.3", atmosphere_requirements)
 
     def test_release_points_to_exact_immutable_snapshot(self):
         release = json.loads((ROOT / "release.json").read_text(encoding="utf-8"))
@@ -27,7 +32,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertNotIn("latest", gallery["relativePath"])
         self.assertNotIn("current", gallery["relativePath"])
         self.assertEqual(hashlib.sha256(snapshot.read_bytes()).hexdigest(), gallery["sha256"])
-        self.assertEqual(gallery["sha256"], "317ed2444a8109722fd6bdafd00c1f43b66b59096aea8b29d6aecfb2a542f608")
+        self.assertEqual(gallery["sha256"], "40b7553300a16df28a83dfe8b2edf414b397c3902754a5aaddf95cf1cb4025bd")
         self.assertEqual(gallery["productionInputSchemaVersion"], 2)
         self.assertEqual(gallery["productionRuntimeSemanticsVersion"], 2)
 
@@ -75,16 +80,17 @@ class RepositoryContractTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-            "317ed2444a8109722fd6bdafd00c1f43b66b59096aea8b29d6aecfb2a542f608",
+            "40b7553300a16df28a83dfe8b2edf414b397c3902754a5aaddf95cf1cb4025bd",
         )
         self.assertEqual(
             (skill / "references/contracts/approved-template-image-envelope.schema.json").read_bytes(),
             (ROOT / "contracts/shared/approved-template-image-envelope.schema.json").read_bytes(),
         )
 
-    def test_both_skills_bundle_their_portable_runtime_contracts(self):
+    def test_skills_bundle_their_portable_runtime_contracts(self):
         producer = ROOT / "skills/meme-template-image-producer/references/contracts"
         compiler = ROOT / "skills/meme-template-json-compiler/references/contracts"
+        atmosphere = ROOT / "skills/template-atmosphere-image-producer/references/contracts"
         shared = ROOT / "contracts/shared"
         self.assertEqual(
             (producer / "approved-template-image-envelope.schema.json").read_bytes(),
@@ -94,7 +100,11 @@ class RepositoryContractTests(unittest.TestCase):
             (producer / "image-revision-review-context.schema.json").read_bytes(),
             (shared / "image-revision-review-context.schema.json").read_bytes(),
         )
-        for skill_contract in (producer / "production-index.schema.json", compiler / "production-index.schema.json"):
+        for skill_contract in (
+            producer / "production-index.schema.json",
+            compiler / "production-index.schema.json",
+            atmosphere / "production-index.schema.json",
+        ):
             self.assertEqual(skill_contract.read_bytes(), (shared / "production-index.schema.json").read_bytes())
         self.assertEqual(
             (compiler / "key-registry.schema.json").read_bytes(),

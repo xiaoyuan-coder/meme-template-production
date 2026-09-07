@@ -1,4 +1,4 @@
-"""Maintenance-only reproducible package and install verification for both Skills."""
+"""Maintenance-only reproducible package and install verification for production Skills."""
 
 from __future__ import annotations
 
@@ -19,7 +19,11 @@ class ReleaseError(ValueError):
     """Raised when source, package, or installation digests diverge."""
 
 
-ALLOWED_SKILLS = {"meme-template-image-producer", "meme-template-json-compiler"}
+ALLOWED_SKILLS = {
+    "meme-template-image-producer",
+    "meme-template-json-compiler",
+    "template-atmosphere-image-producer",
+}
 IGNORED_NAMES = {".DS_Store", "__pycache__"}
 FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 

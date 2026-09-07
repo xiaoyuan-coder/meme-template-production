@@ -1,0 +1,6 @@
+interface:
+  display_name: "氛围图创意导演"
+  short_description: "生成并筛选模板氛围图，上传 OSS 后回填 imageUrl"
+  default_prompt: "Use $template-atmosphere-image-producer to plan, generate, review, finalize, upload, and register template atmosphere images."
+policy:
+  allow_implicit_invocation: true

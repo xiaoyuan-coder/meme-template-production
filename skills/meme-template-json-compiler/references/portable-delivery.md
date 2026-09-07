@@ -22,7 +22,7 @@
 
 ## 状态续跑与看板读回
 
-JSON-only revision 以现有 `approved_uploaded` envelope、当前 key 和上一版正式 JSON 为基线。新 revision 明确记录新增、删除和修改的 slot ID；未列入变更范围的槽位、主体拓扑、图片 URL 和 key 保持原值。通过 `compile_json_revision` 校验变更范围后交付，调用合同见 [返修与读回校验.md](返修与读回校验.md)。需要换图的 item 单独回到图片 Skill，其余 item 继续 JSON 编译。
+JSON-only revision 以现有 `approved_uploaded` envelope、当前 key 和上一版正式 JSON 为基线。新 revision 明确记录新增、删除和修改的 slot ID；未列入变更范围的槽位、主体拓扑、`cover`、`referenceImage`、`imageUrl` 和 key 保持原值。通过 `compile_json_revision` 校验变更范围后交付，调用合同见 [返修与读回校验.md](返修与读回校验.md)。需要换模板图的 item 单独回到第一 Skill；需要新氛围图的 item 进入第三 Skill；其余 item 继续 JSON 编译。
 
 ### 工作台当前交付规则（2026-09-04 用户确认）
 

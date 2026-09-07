@@ -1127,6 +1127,13 @@ def validate_formal_json(formal: Mapping[str, Any]) -> None:
         image_asset["baseUrl"] + image_asset["pathPrefix"]
     ):
         raise ContractError("formal image URL must use the immutable Memebuy template-image path")
+    atmosphere = contract["atmosphereImage"]
+    image_url = formal.get("imageUrl")
+    if image_url is not None and (
+        not isinstance(image_url, str)
+        or not image_url.startswith(atmosphere["baseUrl"] + atmosphere["pathPrefix"])
+    ):
+        raise ContractError("imageUrl must be null or use the immutable Memebuy atmosphere-image path")
     bindings = formal.get("runtimeSemantics", {}).get("inputBindings", {})
     for input_id, binding in bindings.items():
         if binding.get("operation") == "replace_identity" and binding.get("clothingOwnership") not in {
@@ -1203,9 +1210,9 @@ def validate_revision_scope(
             raise ContractError("revision scope lists must be unique")
     if not scope["requestEvidence"]:
         raise ContractError("revision scope requires the user request evidence")
-    for field in ("key", "cover", "referenceImage"):
+    for field in ("key", "cover", "referenceImage", "imageUrl"):
         if previous_formal[field] != revised_formal[field]:
-            raise ContractError("JSON-only revision must preserve key and approved image URLs")
+            raise ContractError("JSON-only revision must preserve key and image URLs")
 
     before = deepcopy(dict(previous_formal))
     after = deepcopy(dict(revised_formal))
@@ -1248,6 +1255,8 @@ def compile_json_revision(
     if registry_response.get("decision") != "EXISTING_SAME_SOURCE":
         raise ContractError("JSON-only revision requires an existing source identity")
     revised = compile_final_json(approved_image, analysis, formal_draft, registry_response)
+    revised["imageUrl"] = previous_formal.get("imageUrl")
+    validate_formal_json(revised)
     validate_revision_scope(previous_formal, revised, scope)
     return revised
 
@@ -1332,7 +1341,7 @@ def project_formal_json(
 ) -> dict[str, Any]:
     """Project the immutable upstream image URL directly into the formal object."""
 
-    if "cover" in formal_draft or "referenceImage" in formal_draft:
+    if any(field in formal_draft for field in ("cover", "referenceImage", "imageUrl")):
         raise ContractError("formal draft must not pre-populate OSS URLs")
     validate_approved_image_envelope(approved_image)
     _validate_key(formal_draft.get("key"))
@@ -1340,6 +1349,7 @@ def project_formal_json(
     formal = deepcopy(dict(formal_draft))
     formal["cover"] = url
     formal["referenceImage"] = url
+    formal["imageUrl"] = None
     return formal
 
 
