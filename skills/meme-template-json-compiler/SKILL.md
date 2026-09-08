@@ -25,9 +25,11 @@ description: 将已审核并上传的模板图独立分析为可复用的 Galler
 
 ### 1. 明确用户想重制什么
 
-读取 [product-model.md](references/product-model.md) 和 [approved-image-analysis.md](references/approved-image-analysis.md)。先完成 `templateValue` 与 `playDecisionModel`，再盘点组件。
+读取 [product-model.md](references/product-model.md)、[play-mechanism-review.md](references/play-mechanism-review.md) 和 [approved-image-analysis.md](references/approved-image-analysis.md)。先查看图片，完成玩法机制的视觉证据与反事实检查，形成 `templateValue` 与 `playDecisionModel`，再进入组件盘点和槽位设计。
 
 说清楚：图片为什么有趣或值得使用，用户想把自己的什么放进去，主动改变哪些内容，以及哪些机制使改后的图仍然成立。按分析合同记录主体、身份单元、文字、动作关系和空间结构，为后续取舍提供图像证据。
+
+完成标准：能用原图的具体部位证明核心关系，说明失去该关系会怎样改变玩法，并说明替换输入时需要共同变化的部位。仅有组件清单、情绪词或画风名称时，继续观察，暂不编写模板草稿；局部关系看不清时查看原尺寸或放大该区域。
 
 ### 2. 选择最小有用的控制集合
 

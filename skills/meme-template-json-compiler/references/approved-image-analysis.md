@@ -6,6 +6,8 @@
 
 ## 分析顺序
 
+玩法取证与完成标准执行 [play-mechanism-review.md](play-mechanism-review.md)。形态融合、替代与连续生长关系进入现有机制和空间关系字段；语义复核证据进入现有 self-review 检查项。
+
 先理解模板，再决定字段。顺序固定为：
 
 1. `templateValue`：说明为什么入选、核心玩法、必须固定的机制和后端执行事实。
