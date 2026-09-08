@@ -7,9 +7,9 @@
   },
   "sharedContractVersion": 3,
   "galleryContract": {
-    "identity": "agent-template-json-runtime-contract-2026-09-06",
-    "relativePath": "contracts/upstream/gallery-template/agent-template-json-runtime-contract-2026-09-06/gallery-template.schema.json",
-    "sha256": "40b7553300a16df28a83dfe8b2edf414b397c3902754a5aaddf95cf1cb4025bd",
+    "identity": "agent-template-json-runtime-contract-2026-09-08",
+    "relativePath": "contracts/upstream/gallery-template/agent-template-json-runtime-contract-2026-09-08/gallery-template.schema.json",
+    "sha256": "38166c6b4939b11a1a5934fc1342baf35dba833dcda40a6179e5cde858369efb",
     "productionInputSchemaVersion": 2,
     "productionRuntimeSemanticsVersion": 2
   }

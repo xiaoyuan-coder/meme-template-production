@@ -59,6 +59,27 @@ description 使用 1–20 个中文字符，用面向用户的自然语言补充
 
 每个 `replace_identity` binding 显式写 `clothingOwnership=source|template`。同时在 `featureAuthority` 中逐轴记录 `identity/body/ageStage/hair/clothing/accessories/expression/pose/action` 由用户图还是模板掌控，每项都要有可核对的理由。身份必须来自用户图；服装决议必须与 `clothingOwnership` 一致。模板只保留属于核心机制、构图依赖或显式转换的最小特征集。身份图的背景、构图、光线和无关道具不随上传图进入模板。详细判定见 [product-model.md](product-model.md#身份图与模板的特征权限)。
 
+## targetInstances 与 inputBindings：把输入落实到画面
+
+这两组字段与 visualContract 一起决定用户输入如何生效。`targetInstances` 标识画面中的作用目标，`inputBindings` 声明每个输入控制哪些目标，visualContract 决定这些目标怎样呈现。按此顺序检查一致性，避免用后端长句补救缺失的绑定。
+
+| 字段或关系 | 编写要求 |
+| --- | --- |
+| `targetInstances[].id` | 使用稳定、唯一的内部标识 |
+| `kind` | 按身份主体、内容元素或合同支持的群组类型选择；具体结构按 Gallery v2 Schema |
+| `role` | 表达模板中的职责，如“左侧人物”“下方徽章”，避免用开放默认身份定位 |
+| `region` | 表达可核对的相对位置或范围；开放物件后，其名称也从关联目标定位中移除 |
+| `inputBindings` 的键 | 与正式槽位 ID 集合完全一致，每槽一个 binding |
+| `targetIds` | 指向真实目标；数量与 bindingPolicy 或 distributionPolicy 相容 |
+
+身份输入使用 `replace_identity`，按单一实例、重复身份和动态群组选择对应策略。文字、图案或物件内容使用合同允许的 `replace_content`，不能自行创造 `replace_text` 等操作。相同输入作用于多个目标时，按实际合同选择分配策略，并在 visualContract 中保持对应关系；不假定后端会自动推导额外目标。
+
+例如左侧人物与右侧人物可分别替换：建立两个稳定身份 target，两个输入分别绑定各自 target；共同拥抱动作写入 `relations`。同一个身份在三格中重复出现时，一个输入绑定多个实例，配合 `same_source_repeated` 保持身份一致。人数可变的群体按群组合同表示，不逐人硬编码成固定数量。
+
+含独立图案和文字的模板，即使两个输入服务同一主题，也分别接收和执行输入。后端没有联动合同，就不能承诺改图案后标签文字会自动改写。
+
+修改某个开放内容时，沿“槽位 → target → binding → visualContract”检查受影响位置，再核对前台 Prompt、标题和标签。完成条件是每个输入有明确目标、每个目标有准确角色及区域，绑定决议与分析一致，语义冲突有可定位的处理结果。
+
 ## 默认值与推荐项
 
 默认值来自当前 Approved Image，采用用户日常会说的专名或普通名词。身份主体能够较高置信识别为具体动漫/IP 角色、真人或历史人物时，默认值使用具体通行姓名；可按需联网核对官方资料，并在 `identityRecognition` 中记录结论和依据。服装、发型、标志、画面文字等稳定特征已经足以确认身份时，不能用外观描述替代角色名。识别不充分时使用简洁的可见身份描述，不臆造姓名。
@@ -87,17 +108,21 @@ Prompt Template 是给用户看的“这张图可以怎么改”。使用 1–3 
 
 年龄转换、完整重绘、身份接管、服装归属、构图锁定、画风、光色、遮挡、实例同步等执行约束写入后端 `runtimeSemantics`。Prompt Template 不出现内部 ID、字段名、槽位术语、上传图处理说明或这些后端约束，也不重复锁死开放默认值。
 
+### 前台 Prompt 与后端约束的衔接
+
+前台说明用户能做出的版本和理解玩法所需的关系；后端承担媒介画风、重绘、空间与身份权限。用户替换内容后，前台句子保持自然，后端为新内容提供足够的视觉约束。自由编辑内容留在 Prompt 的自然叙述里，默认值不写入固定约束。
+
+例如可换左右人物的拥抱模板，前台可以写 `{{ left_person | "默认人物甲" }}和{{ right_person | "默认人物乙" }}紧紧拥抱。` 两个默认值在生产时从图片识别；左右位置与接触遮挡由 target 和 relations 管理，具体线条、造型和着色由 medium、styleTraits 与 colorAndLight 管理。
+
+占位符一次出现并不证明语义完整。逐一代入推荐项，检查句法、指代和输入覆盖；图片输入与文字同时存在时按 `image_over_text` 决议解释身份或内容，不重复恢复文字默认值。缺少后端可执行映射的愿望不能仅靠前台文案承诺。
+
 ## metadata.tags
 
-逐图生成 5–8 个简洁、不重复的中文 tag。Tags 的任务是检索召回，每个 tag 都要能回答“用户用什么词搜这种模板”。至少一个必须精确来自 11 个正式大类：`人物、动物、二次元、粉丝应援、情侣、亲子家庭、美食、风景建筑、搞怪meme、文字设计、创意艺术`。
-
-其余 tag 优先覆盖用户常搜的动作、情绪、场景、玩法、关系、用途、主体类别或媒介词，可以纳入同义表达，例如“睡觉、困倦、抱着睡”分别承接不同查询。每个 tag 在 `tagEvidence` 中同时记录图像根据和检索意图。任何开放槽改变后会失真的默认身份、默认文字、服装或颜色不得写入 tag。避免把批次通用词、实现术语和无检索价值的视觉清单当成 tag。
+编写或修改检索标签时，读取 [tags.md](tags.md)，执行数量与长度、正式大类、查询选词、开放内容排除及逐项证据规则。以用户可能输入的查询词组织标签，按实际图片选择，完成替换后的适用性复核。
 
 ## runtimeSemantics.visualContract
 
-`inputBindings` 精确描述每个用户输入接管哪些目标。`visualContract` 用正向、可观察的后端语言保留模板的媒介、构图、关系、动作、实例同步、色彩逻辑和光线逻辑，并完整写入 `backendOnlyFacts`。
-
-visualContract 约束“表现方式”和“玩法机制”，不锁回开放内容。开放的人物身份、物种、文字、物件、服装、配饰和颜色，其默认值及推荐值不得重新出现在 visualContract 中。动态群组只能约束围拢、托举等关系，不得把可变人数写成“三个人”“四只手”等固定数量。后端可以说明输入图片只提供哪些身份或内容事实，同时不使用“主体槽、图片槽、独立槽位”一类界面实现术语。
+编写或修改视觉约束时，读取 [visual-contract.md](visual-contract.md)，按五字段结构表达媒介、风格、构图、关系和色光逻辑。先从分析提取 `backendOnlyFacts`，再完整落实到后端约束；输入的控制范围由 `inputBindings` 管理。
 
 ## 编译后自复核
 
@@ -109,4 +134,4 @@ visualContract 约束“表现方式”和“玩法机制”，不锁回开放�
 
 `imageSize` 精确读取 Approved Image 宽高，必须等于正式尺寸枚举之一。`cover` 与 `referenceImage` 始终相等，并逐字复用 Approved Template Image v2 已携带的 immutable OSS URL；编译器不得自行推导或改写 URL。
 
-初始正式 JSON 同时写出 `imageUrl: null`。该字段由第三个氛围图 Skill 在人工选定最终图、OSS 上传与公开读回完成后回填；普通 JSON 返修沿用当前值。
+第二 Skill 的首次与返修交付均省略 `imageUrl`。第三个氛围图 Skill 在人工选定最终图、OSS 上传与公开读回完成后添加该字段。返修读取含该字段的存量对象时，保留原文件和完整摘要，输出只含第二阶段字段。

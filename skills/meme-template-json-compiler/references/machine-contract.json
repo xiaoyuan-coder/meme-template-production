@@ -1,10 +1,10 @@
 {
-  "contractVersion": 6,
+  "contractVersion": 8,
   "deliveryReadback": {
     "surfaceFields": {
-      "list": ["key", "title", "description", "cover", "imageUrl"],
+      "list": ["key", "title", "description", "cover"],
       "detail": ["*"],
-      "editPreview": ["key", "promptTemplate", "inputSchema", "preprocessSteps", "runtimeSemantics", "referenceImage", "imageUrl"],
+      "editPreview": ["key", "promptTemplate", "inputSchema", "preprocessSteps", "runtimeSemantics", "referenceImage"],
       "export": ["*"]
     }
   },
@@ -23,16 +23,16 @@
     "portableAdapter": "SnapshotKeyRegistryReader"
   },
   "gallery": {
-    "snapshotIdentity": "agent-template-json-runtime-contract-2026-09-06",
-    "snapshotRelativePath": "contracts/upstream/gallery-template/agent-template-json-runtime-contract-2026-09-06/gallery-template.schema.json",
+    "snapshotIdentity": "agent-template-json-runtime-contract-2026-09-08",
+    "snapshotRelativePath": "contracts/upstream/gallery-template/agent-template-json-runtime-contract-2026-09-08/gallery-template.schema.json",
     "installedSnapshotRelativePath": "references/contracts/gallery-template.schema.json",
-    "snapshotSha256": "40b7553300a16df28a83dfe8b2edf414b397c3902754a5aaddf95cf1cb4025bd",
+    "snapshotSha256": "38166c6b4939b11a1a5934fc1342baf35dba833dcda40a6179e5cde858369efb",
     "inputSchemaVersion": 2,
     "runtimeSemanticsVersion": 2,
     "formalFields": [
       "key", "status", "title", "description", "imageSize", "imageN", "kind",
       "promptTemplate", "inputSchema", "preprocessSteps", "runtimeSemantics",
-      "metadata", "cover", "referenceImage", "imageUrl"
+      "metadata", "cover", "referenceImage"
     ]
   },
   "imageAsset": {
@@ -43,7 +43,7 @@
   "atmosphereImage": {
     "baseUrl": "https://assets.memebuy.cn",
     "pathPrefix": "/memebuy/template-atmosphere/sha256/",
-    "initialValue": null,
+    "secondStageDelivery": "omitted",
     "owner": "template-atmosphere-image-producer"
   },
   "authoring": {

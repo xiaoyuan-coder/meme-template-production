@@ -11,7 +11,7 @@
 1. `templateValue`：说明为什么入选、核心玩法、必须固定的机制和后端执行事实。
 2. `playDecisionModel`：在看组件清单之前，写出好玩命题、用户重制愿望和核心可执行控制。每项控制只映射一个正式槽位；多个控制可以服务同一更高层使用意图。
 3. `componentGraph/identityTopology/textRegions`：逐一识别主体、实例、物件、文字、箭头、容器、贴纸、商标、遮挡和背景；文字先按句子、笑话、对比或标签系统聚合为语义单元。
-4. `mediumComposition/spatialRelations/containers`：记录画风媒介、构图、光色、动作、接触、持握、穿戴、前后层级和嵌套关系。
+4. `mediumComposition/spatialRelations/containers`：按 [视觉约束规范](visual-contract.md) 的媒介与画风观察方法记录具体画法、区域适用范围和身份继承边界，同时记录构图、光色、动作、接触、持握、穿戴及嵌套关系。
 5. `editableCandidates/slotCoverageReview`：先对八个候选轴做召回检查，再对每个候选做精度门禁，并给出选中或排除理由。
 6. `semanticModel`：从同一个语义模型投影 Prompt Template 和 runtimeSemantics。
 7. `selfReview`：对最终草稿重新复核，绑定草稿 SHA，问题修正后重跑。
@@ -28,6 +28,8 @@
 - `funProposition`：用一句话解释反差、包袱、情绪投射、伪商品包装或其他可复用钩子。
 - `userRecreationWish`：用“用户想把……放进……”的用户视角表达重制愿望。
 - `coreUserDecisions`：每项包含稳定 `decisionId`、用户操作描述、对应 `slotId` 和图像根据。正式槽位与可执行控制一一对账。图案与文字表达同一概念、但后端需要两个独立 binding 时，建立两个 control decision 和两个槽位；证据中写明共同意图与独立输入边界。
+
+`mediumComposition` 保存已选定的稳定视觉规则：媒介与最终字段一致，画风、构图和色光条目由正式同名字段完整保留。条目须为非空白文字、最多 500 字符且不重复；原始观察与可替换外观放在现有分析证据中。执行 [视觉约束规范](visual-contract.md) 的对应合同。
 
 ## 图像事实与计数
 

@@ -43,7 +43,7 @@ class DeliveryRevisionTests(unittest.TestCase):
         with self.assertRaises(compiler.ContractError):
             compiler.compile_json_revision(self.previous, self.scope, self.envelope, analysis, draft, dict(registry, decision="NEW"))
 
-    def test_json_revision_preserves_backfilled_atmosphere_url(self):
+    def test_json_revision_omits_third_stage_field_and_preserves_prior_object(self):
         self.previous["imageUrl"] = (
             "https://assets.memebuy.cn/memebuy/template-atmosphere/sha256/"
             + "a" * 64
@@ -58,10 +58,12 @@ class DeliveryRevisionTests(unittest.TestCase):
             "registryRevision": "r2", "decision": "EXISTING_SAME_SOURCE",
             "resolvedKey": draft["key"], "matchedBy": ["canonicalSourceIdentity"], "evidence": [],
         }
+        original = copy.deepcopy(self.previous)
         revised = compiler.compile_json_revision(
             self.previous, self.scope, self.envelope, analysis, draft, registry
         )
-        self.assertEqual(revised["imageUrl"], self.previous["imageUrl"])
+        self.assertNotIn("imageUrl", revised)
+        self.assertEqual(self.previous, original)
 
     def test_title_revision_rejects_unrequested_slot_binding_and_topology_changes(self):
         mutations = [

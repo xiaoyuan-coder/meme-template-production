@@ -57,10 +57,10 @@
       "additionalProperties": false,
       "required": ["medium", "styleTraits", "composition", "colorAndLight"],
       "properties": {
-        "medium": {"type": "string", "minLength": 1},
-        "styleTraits": {"type": "array", "minItems": 1},
-        "composition": {"type": "array", "minItems": 1},
-        "colorAndLight": {"type": "array"}
+        "medium": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S"},
+        "styleTraits": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S"}},
+        "composition": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S"}},
+        "colorAndLight": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S"}}
       }
     },
     "spatialRelations": {"type": "array", "items": {"type": "object"}},

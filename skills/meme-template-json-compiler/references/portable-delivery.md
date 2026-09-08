@@ -22,7 +22,7 @@
 
 ## 状态续跑与看板读回
 
-JSON-only revision 以现有 `approved_uploaded` envelope、当前 key 和上一版正式 JSON 为基线。新 revision 明确记录新增、删除和修改的 slot ID；未列入变更范围的槽位、主体拓扑、`cover`、`referenceImage`、`imageUrl` 和 key 保持原值。通过 `compile_json_revision` 校验变更范围后交付，调用合同见 [返修与读回校验.md](返修与读回校验.md)。需要换模板图的 item 单独回到第一 Skill；需要新氛围图的 item 进入第三 Skill；其余 item 继续 JSON 编译。
+JSON-only revision 以现有 `approved_uploaded` envelope、当前 key 和上一版正式 JSON 为基线。新 revision 明确记录新增、删除和修改的 slot ID；未列入变更范围的槽位、主体拓扑、`cover`、`referenceImage` 和 key 保持原值；第二阶段新产物省略 `imageUrl`，原交付中的氛围图字段继续由第三 Skill 和数据台保管。通过 `compile_json_revision` 校验变更范围后交付，调用合同见 [返修与读回校验.md](返修与读回校验.md)。需要换模板图的 item 单独回到第一 Skill；需要新氛围图的 item 进入第三 Skill；其余 item 继续 JSON 编译。
 
 ### 工作台当前交付规则（2026-09-04 用户确认）
 
@@ -45,3 +45,9 @@ JSON-only revision 以现有 `approved_uploaded` envelope、当前 key 和上一
 读回证据保存在 sidecar 或本地数据台记录中，至少包含 key、修订身份、正式 JSON 引用与内容摘要、读回时间和各入口核对结果。只有全部符合时才报告“工作台已更新到最新交付”。数据台不可用或仍读到旧版时，报告“便携交付完成、工作台最新版本读回待完成”，并给出 `production-index.json` 入口和受影响的 key。生产 Skill 保持便携交付边界，工作台刷新与读回由本地数据台执行。
 
 正式 `<key>.json` 不包含顶层 `id`、sidecar、receipt、审核、路径、API 响应或运行状态。顶层模板 `id` 只由后端入库生成；已上线数据从管理台导出时可能带有该字段，不能据此写回生产交付。`inputSchema.slots[].id` 与 `runtimeSemantics.targetInstances[].id` 是模板内部绑定标识，继续保留。删除 sidecar 不改变已交付 JSON 的运行语义。
+
+## 2026-09-08 字段归属调整
+
+第二阶段的交付与读回比较只覆盖自身字段，均省略 `imageUrl`。工作台采集观察时显式去除第三阶段字段，再交给 `validate_delivery_readback`。研发入库采用第二阶段字段投影更新；缺省 `imageUrl` 表示本阶段不提供该字段，不应据此清空数据库已有氛围图。需要输出带氛围图的完整版本时，由第三 Skill 使用已有有效回执重新完成回填与读回，无须由第二 Skill 携带地址。
+
+正式 JSON 写入通过同文件系统硬链接原子创建目标，已有同内容文件幂等复用，已有不同内容报冲突；临时文件位于交付根目录，完成或失败均清理。目标所在文件系统需要支持硬链接，macOS/Linux 本地文件系统适用。

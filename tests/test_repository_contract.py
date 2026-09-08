@@ -32,7 +32,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertNotIn("latest", gallery["relativePath"])
         self.assertNotIn("current", gallery["relativePath"])
         self.assertEqual(hashlib.sha256(snapshot.read_bytes()).hexdigest(), gallery["sha256"])
-        self.assertEqual(gallery["sha256"], "40b7553300a16df28a83dfe8b2edf414b397c3902754a5aaddf95cf1cb4025bd")
+        self.assertEqual(gallery["sha256"], "38166c6b4939b11a1a5934fc1342baf35dba833dcda40a6179e5cde858369efb")
         self.assertEqual(gallery["productionInputSchemaVersion"], 2)
         self.assertEqual(gallery["productionRuntimeSemanticsVersion"], 2)
 
@@ -80,7 +80,7 @@ class RepositoryContractTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(snapshot.read_bytes()).hexdigest(),
-            "40b7553300a16df28a83dfe8b2edf414b397c3902754a5aaddf95cf1cb4025bd",
+            "38166c6b4939b11a1a5934fc1342baf35dba833dcda40a6179e5cde858369efb",
         )
         self.assertEqual(
             (skill / "references/contracts/approved-template-image-envelope.schema.json").read_bytes(),

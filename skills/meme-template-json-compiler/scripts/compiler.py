@@ -94,7 +94,7 @@ def _sha_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def sha256_json(value: Mapping[str, Any]) -> str:
+def sha256_json(value: Any) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return _sha_bytes(encoded)
 
@@ -327,6 +327,37 @@ _PROMPT_SLOT = re.compile(
 )
 
 
+def _validate_medium_facts(medium: Mapping[str, Any]) -> None:
+    """Validate stable visual facts selected for the final rendering contract."""
+    value = medium["medium"]
+    if not isinstance(value, str) or not value.strip() or len(value) > 500:
+        raise ContractError("mediumComposition.medium requires 1–500 characters")
+    for field in ("styleTraits", "composition", "colorAndLight"):
+        values = medium[field]
+        if not isinstance(values, list) or any(
+            not isinstance(fact, str) or not fact.strip() or len(fact) > 500
+            for fact in values
+        ):
+            raise ContractError(f"mediumComposition.{field} requires non-empty text facts of at most 500 characters")
+        if len(set(values)) != len(values):
+            raise ContractError(f"mediumComposition.{field} facts must be unique")
+        if field != "colorAndLight" and not values:
+            raise ContractError(f"mediumComposition.{field} requires stable visual facts")
+
+
+def _validate_medium_projection(analysis: Mapping[str, Any]) -> None:
+    """Preserve selected facts in their matching fields, allowing added constraints."""
+    medium = analysis["mediumComposition"]
+    _validate_medium_facts(medium)
+    visual = analysis["semanticModel"]["runtimeSemantics"].get("visualContract")
+    if not isinstance(visual, Mapping) or visual.get("medium") != medium["medium"]:
+        raise ContractError("visualContract.medium must match the analyzed medium")
+    for field in ("styleTraits", "composition", "colorAndLight"):
+        output = visual.get(field)
+        if not isinstance(output, list) or any(fact not in output for fact in medium[field]):
+            raise ContractError(f"visualContract.{field} must retain every selected mediumComposition fact")
+
+
 def validate_approved_image_analysis(
     analysis: Mapping[str, Any], approved_image: Mapping[str, Any]
 ) -> None:
@@ -405,12 +436,8 @@ def validate_approved_image_analysis(
         "medium", "styleTraits", "composition", "colorAndLight"
     }:
         raise ContractError("mediumComposition is incomplete")
-    _non_empty_text(medium["medium"], "mediumComposition.medium")
-    for name in ("styleTraits", "composition", "colorAndLight"):
-        if not isinstance(medium[name], list):
-            raise ContractError(f"mediumComposition.{name} must be an array")
-    if not medium["styleTraits"] or not medium["composition"]:
-        raise ContractError("mediumComposition requires style and composition facts")
+    _validate_medium_facts(medium)
+
     evidence = analysis["fieldEvidence"]
     expected = set(_contract()["authoring"]["expectedEvidenceFields"])
     if not isinstance(evidence, Mapping) or set(evidence) != expected:
@@ -515,6 +542,7 @@ def compile_semantics_from_analysis(analysis: Mapping[str, Any]) -> dict[str, An
     """Compile both prompt surfaces from the single approved-image semantic model."""
 
     _validate_semantic_model(analysis)
+    _validate_medium_projection(analysis)
     return {
         "promptTemplate": analysis["semanticModel"]["promptTemplate"],
         "runtimeSemantics": deepcopy(analysis["semanticModel"]["runtimeSemantics"]),
@@ -1074,9 +1102,20 @@ def validate_authoring_contract(
 def validate_formal_json(formal: Mapping[str, Any]) -> None:
     contract = _contract()
     gallery = contract["gallery"]
+    if not isinstance(formal, Mapping):
+        raise ContractError("formal JSON must be an object")
     if set(formal) - set(gallery["formalFields"]):
         forbidden = sorted(set(formal) - set(gallery["formalFields"]))
         raise ContractError(f"formal JSON contains forbidden fields: {forbidden}")
+    schema_path = _SKILL_ROOT / "references/contracts/gallery-template.schema.json"
+    schema_bytes = schema_path.read_bytes()
+    if _sha_bytes(schema_bytes) != gallery["snapshotSha256"]:
+        raise ContractError("vendored Gallery snapshot digest mismatch")
+    validator = Draft202012Validator(json.loads(schema_bytes), format_checker=FormatChecker())
+    errors = sorted(validator.iter_errors(formal), key=lambda e: str(list(e.path)))
+    if errors:
+        path = ".".join(str(part) for part in errors[0].path)
+        raise ContractError(f"Gallery snapshot validation failed at {path}: {errors[0].message}")
     if formal.get("inputSchema", {}).get("version") != gallery["inputSchemaVersion"]:
         raise ContractError("production inputSchema.version must be 2")
     if formal.get("runtimeSemantics", {}).get("version") != gallery["runtimeSemanticsVersion"]:
@@ -1101,12 +1140,22 @@ def validate_formal_json(formal: Mapping[str, Any]) -> None:
     ):
         raise ContractError("production promptTemplate exposes internal terminology")
     slots = formal.get("inputSchema", {}).get("slots", [])
+    if len(slots) > authoring["slotCountPreference"]["maximum"]:
+        raise ContractError("production templates allow at most four high-value slots")
     slot_ids = [slot.get("id") for slot in slots if isinstance(slot, Mapping)]
+    if len(set(slot_ids)) != len(slot_ids):
+        raise ContractError("slot IDs must be unique")
     placeholders = _PROMPT_SLOT.findall(prompt)
     if len(placeholders) != len(slots) or sorted(slot_id for slot_id, _ in placeholders) != sorted(slot_ids):
         raise ContractError("production promptTemplate must contain every slot exactly once")
     defaults = authoring["slotDefaults"]
     for slot in slots:
+        text_mode = slot.get("text")
+        if not isinstance(text_mode, Mapping):
+            raise ContractError("every production slot requires text input")
+        if any(not _slot_value_language_compatible(text_mode["defaultValue"], suggestion)
+               for suggestion in text_mode["suggestions"]):
+            raise ContractError("recommendations must match the default language")
         if slot.get("required") is not defaults["required"]:
             raise ContractError("production slots must remain optional")
         image = slot.get("image")
@@ -1127,30 +1176,14 @@ def validate_formal_json(formal: Mapping[str, Any]) -> None:
         image_asset["baseUrl"] + image_asset["pathPrefix"]
     ):
         raise ContractError("formal image URL must use the immutable Memebuy template-image path")
-    atmosphere = contract["atmosphereImage"]
-    image_url = formal.get("imageUrl")
-    if image_url is not None and (
-        not isinstance(image_url, str)
-        or not image_url.startswith(atmosphere["baseUrl"] + atmosphere["pathPrefix"])
-    ):
-        raise ContractError("imageUrl must be null or use the immutable Memebuy atmosphere-image path")
     bindings = formal.get("runtimeSemantics", {}).get("inputBindings", {})
+    if set(bindings) != set(slot_ids):
+        raise ContractError("every slot requires exactly one runtime input binding")
     for input_id, binding in bindings.items():
         if binding.get("operation") == "replace_identity" and binding.get("clothingOwnership") not in {
             "source", "template"
         }:
             raise ContractError(f"identity binding {input_id} requires clothingOwnership")
-
-    schema_path = _SKILL_ROOT / "references/contracts/gallery-template.schema.json"
-    schema_bytes = schema_path.read_bytes()
-    if _sha_bytes(schema_bytes) != gallery["snapshotSha256"]:
-        raise ContractError("vendored Gallery snapshot digest mismatch")
-    schema = json.loads(schema_bytes)
-    validator = Draft202012Validator(schema, format_checker=FormatChecker())
-    errors = sorted(validator.iter_errors(formal), key=lambda e: list(e.path))
-    if errors:
-        path = ".".join(str(part) for part in errors[0].path)
-        raise ContractError(f"Gallery snapshot validation failed at {path}: {errors[0].message}")
 
 
 def compile_final_json(
@@ -1184,7 +1217,7 @@ def _changed_field_paths(before: Any, after: Any, path: str = "") -> set[str]:
             else:
                 changed.update(_changed_field_paths(before[key], after[key], child))
         return changed
-    return set() if before == after else {path}
+    return set() if sha256_json(before) == sha256_json(after) else {path}
 
 
 def validate_revision_scope(
@@ -1193,7 +1226,11 @@ def validate_revision_scope(
     scope: Mapping[str, Any],
 ) -> None:
     """Reject changes outside a request-derived scope bound to the prior delivery."""
-    validate_formal_json(previous_formal)
+    # A prior workbench object may already carry the third Skill's field.
+    # Keep the full object as the scope digest anchor, compare stage-two fields only.
+    previous_stage_two = deepcopy(dict(previous_formal))
+    previous_stage_two.pop("imageUrl", None)
+    validate_formal_json(previous_stage_two)
     validate_formal_json(revised_formal)
     if not isinstance(scope, Mapping) or set(scope) != {
         "previousFormalSha256", "requestEvidence", "addedSlotIds",
@@ -1210,11 +1247,11 @@ def validate_revision_scope(
             raise ContractError("revision scope lists must be unique")
     if not scope["requestEvidence"]:
         raise ContractError("revision scope requires the user request evidence")
-    for field in ("key", "cover", "referenceImage", "imageUrl"):
+    for field in ("key", "cover", "referenceImage"):
         if previous_formal[field] != revised_formal[field]:
             raise ContractError("JSON-only revision must preserve key and image URLs")
 
-    before = deepcopy(dict(previous_formal))
+    before = previous_stage_two
     after = deepcopy(dict(revised_formal))
     old_list = before["inputSchema"].pop("slots")
     new_list = after["inputSchema"].pop("slots")
@@ -1234,7 +1271,8 @@ def validate_revision_scope(
         "removedSlotIds": old_slots.keys() - new_slots.keys(),
         "modifiedSlotIds": {
             key for key in common
-            if old_slots[key] != new_slots[key] or old_bindings[key] != new_bindings[key]
+            if sha256_json(old_slots[key]) != sha256_json(new_slots[key])
+            or sha256_json(old_bindings[key]) != sha256_json(new_bindings[key])
         },
         "changedFieldPaths": _changed_field_paths(before, after),
     }
@@ -1255,8 +1293,6 @@ def compile_json_revision(
     if registry_response.get("decision") != "EXISTING_SAME_SOURCE":
         raise ContractError("JSON-only revision requires an existing source identity")
     revised = compile_final_json(approved_image, analysis, formal_draft, registry_response)
-    revised["imageUrl"] = previous_formal.get("imageUrl")
-    validate_formal_json(revised)
     validate_revision_scope(previous_formal, revised, scope)
     return revised
 
@@ -1349,7 +1385,6 @@ def project_formal_json(
     formal = deepcopy(dict(formal_draft))
     formal["cover"] = url
     formal["referenceImage"] = url
-    formal["imageUrl"] = None
     return formal
 
 
@@ -1359,12 +1394,12 @@ def write_formal_json(delivery_root: Path, formal: Mapping[str, Any]) -> Path:
     validate_formal_json(formal)
     key = _validate_key(formal.get("key"))
     raw_root = Path(delivery_root)
-    if raw_root.exists() and raw_root.is_symlink():
+    if raw_root.is_symlink():
         raise ContractError("delivery root must not be a symlink")
     root = raw_root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     item_dir = root / key
-    if item_dir.exists() and (item_dir.is_symlink() or not item_dir.is_dir()):
+    if item_dir.is_symlink() or (item_dir.exists() and not item_dir.is_dir()):
         raise ContractError("formal item directory is unsafe")
     item_dir.mkdir(exist_ok=True)
     if item_dir.resolve().parent != root:
@@ -1374,20 +1409,30 @@ def write_formal_json(delivery_root: Path, formal: Mapping[str, Any]) -> Path:
     if unexpected:
         raise ContractError(f"formal item directory contains extra files: {sorted(unexpected)}")
     encoded = (json.dumps(formal, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    if target.is_symlink():
+        raise ContractError("formal JSON target must not be a symlink")
     if target.exists():
         if target.is_symlink() or target.read_bytes() != encoded:
             raise ContractError("formal JSON content conflict")
         return target
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{key}.", suffix=".tmp", dir=item_dir)
+    # Keep temporary files out of the single-object template directory.
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{key}.", suffix=".tmp", dir=root)
     temporary = Path(temporary_name)
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
-        if target.exists():
-            raise ContractError("formal JSON appeared during write")
-        os.replace(temporary, target)
+        try:
+            os.link(temporary, target)
+        except FileExistsError:
+            if target.is_symlink() or not target.is_file() or target.read_bytes() != encoded:
+                raise ContractError("formal JSON content conflict") from None
+        directory_fd = os.open(item_dir, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if temporary.exists():
             temporary.unlink()

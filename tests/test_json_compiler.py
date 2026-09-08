@@ -819,7 +819,7 @@ class GalleryAndCompilationTests(unittest.TestCase):
         draft = valid_formal_draft()
         digest = hashlib.sha256(PNG_BYTES).hexdigest()
         url = f"https://assets.memebuy.cn/gallery/template-images/{digest}.png"
-        formal = {**draft, "cover": url, "referenceImage": url, "imageUrl": None}
+        formal = {**draft, "cover": url, "referenceImage": url}
         compiler.validate_formal_json(formal)
         backend_export = copy.deepcopy(formal)
         backend_export["id"] = "database-generated-template-id"
@@ -858,8 +858,8 @@ class GalleryAndCompilationTests(unittest.TestCase):
         revised = compiler.project_formal_json(revised_draft, envelope)
         self.assertEqual(first["cover"], revised["cover"])
         self.assertEqual(first["referenceImage"], revised["referenceImage"])
-        self.assertIsNone(first["imageUrl"])
-        self.assertIsNone(revised["imageUrl"])
+        self.assertNotIn("imageUrl", first)
+        self.assertNotIn("imageUrl", revised)
 
     def test_formal_writer_is_create_once_and_path_safe(self):
         draft = valid_formal_draft()
