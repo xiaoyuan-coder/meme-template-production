@@ -27,8 +27,8 @@ class DeliveryRevisionTests(unittest.TestCase):
         draft["title"] = "抱紧你的毛孩子"
         analysis = valid_approved_analysis(self.envelope["image"]["sha256"])
         registry = {
-            "registryRevision": "r2", "decision": "EXISTING_SAME_SOURCE",
-            "resolvedKey": draft["key"], "matchedBy": ["canonicalSourceIdentity"], "evidence": [],
+            "registryRevision": "r2", "decision": "EXISTING_KEY",
+            "resolvedKey": draft["key"], "matchedBy": ["key"], "evidence": [],
         }
         with self.assertRaises(compiler.ContractError):
             compiler.compile_json_revision(self.previous, self.scope, self.envelope, analysis, draft, registry)
@@ -55,8 +55,8 @@ class DeliveryRevisionTests(unittest.TestCase):
         analysis = valid_approved_analysis(self.envelope["image"]["sha256"])
         analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
         registry = {
-            "registryRevision": "r2", "decision": "EXISTING_SAME_SOURCE",
-            "resolvedKey": draft["key"], "matchedBy": ["canonicalSourceIdentity"], "evidence": [],
+            "registryRevision": "r2", "decision": "EXISTING_KEY",
+            "resolvedKey": draft["key"], "matchedBy": ["key"], "evidence": [],
         }
         original = copy.deepcopy(self.previous)
         revised = compiler.compile_json_revision(
@@ -123,6 +123,71 @@ class DeliveryRevisionTests(unittest.TestCase):
             )
             with self.subTest(field=field), self.assertRaises(compiler.ContractError):
                 compiler.validate_revision_scope(self.previous, revised, self.scope)
+
+    def test_full_template_revision_can_replace_image_but_keeps_key_identity(self):
+        envelope = copy.deepcopy(self.envelope)
+        envelope["image"]["sha256"] = "b" * 64
+        envelope["image"]["uri"] = (
+            "https://assets.memebuy.cn/gallery/template-images/" + "b" * 64 + ".png"
+        )
+        analysis = valid_approved_analysis(envelope["image"]["sha256"])
+        analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(self.draft)
+        scope = dict(
+            self.scope,
+            changedFieldPaths=["/cover", "/referenceImage"],
+            requestEvidence=["conversation://request/replace-template-image"],
+        )
+        registry = {
+            "registryRevision": "r2", "decision": "EXISTING_KEY",
+            "resolvedKey": self.draft["key"], "matchedBy": ["key"], "evidence": [],
+        }
+        revised = compiler.compile_template_revision(
+            self.previous, scope, envelope, analysis, self.draft, registry
+        )
+        self.assertEqual(revised["key"], self.previous["key"])
+        self.assertEqual(revised["referenceImage"], envelope["image"]["uri"])
+        changed_key = copy.deepcopy(self.draft)
+        changed_key["key"] = "another-key"
+        analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(changed_key)
+        bad_registry = dict(registry, resolvedKey="another-key")
+        with self.assertRaises(compiler.ContractError):
+            compiler.compile_template_revision(
+                self.previous, scope, envelope, analysis, changed_key, bad_registry
+            )
+
+    def test_scoped_data_revision_does_not_require_image_intake_or_full_analysis(self):
+        revised = copy.deepcopy(self.previous)
+        revised["runtimeSemantics"]["visualContract"]["relations"][1] = (
+            "框内主体与背景统一为针织刺绣媒介，保留清晰纱线纹理"
+        )
+        scope = dict(
+            self.scope,
+            changedFieldPaths=["/runtimeSemantics/visualContract/relations"],
+        )
+        registry = {
+            "registryRevision": "r2", "decision": "EXISTING_KEY",
+            "resolvedKey": revised["key"], "matchedBy": ["existingKey"], "evidence": [],
+        }
+        review = {
+            "status": "passed",
+            "reviewedFormalSha256": compiler.sha256_json(revised),
+            "evidenceRefs": ["conversation://request/medium-constraint", "artifact://reference.png"],
+            "checks": {
+                "requestScope": True,
+                "visualEvidence": True,
+                "mediumConstraint": True,
+                "runtimeConsistency": True,
+            },
+        }
+        compiled = compiler.compile_data_revision(
+            self.previous, scope, revised, registry, review
+        )
+        self.assertEqual(compiled, revised)
+        self.assertEqual(compiled["cover"], self.previous["cover"])
+        stale = copy.deepcopy(review)
+        stale["reviewedFormalSha256"] = "0" * 64
+        with self.assertRaises(compiler.ContractError):
+            compiler.compile_data_revision(self.previous, scope, revised, registry, stale)
 
     def observations(self, formal):
         identity = {

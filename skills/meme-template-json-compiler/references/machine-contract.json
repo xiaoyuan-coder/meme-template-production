@@ -1,5 +1,5 @@
 {
-  "contractVersion": 8,
+  "contractVersion": 10,
   "deliveryReadback": {
     "surfaceFields": {
       "list": ["key", "title", "description", "cover"],
@@ -11,8 +11,10 @@
   "keyPattern": "^[a-z][a-z0-9-]{1,59}$",
   "keyDecisions": [
     "NEW",
+    "EXISTING_KEY",
     "EXISTING_SAME_SOURCE",
     "KEY_COLLISION",
+    "KEY_CONFLICT",
     "SOURCE_CONFLICT",
     "REGISTRY_UNAVAILABLE"
   ],
@@ -20,7 +22,9 @@
     "onlineAdapter": "MemeAdminKeyRegistryClient",
     "method": "POST",
     "path": "/api/v1/template-key-registry/resolve",
-    "portableAdapter": "SnapshotKeyRegistryReader"
+    "portableAdapter": "resolve_template_key",
+    "identity": "key",
+    "sourceIdentityRole": "provenance_only"
   },
   "gallery": {
     "snapshotIdentity": "agent-template-json-runtime-contract-2026-09-08",
@@ -46,7 +50,15 @@
     "secondStageDelivery": "omitted",
     "owner": "template-atmosphere-image-producer"
   },
+  "directInput": {
+    "module": "scripts/direct_input.py",
+    "approval": "explicit_user_approval_bound_to_sha256",
+    "referenceBytes": "preserved",
+    "publication": "create_once_and_public_byte_readback",
+    "templateDataRoot": "portable_and_workbench_optional"
+  },
   "authoring": {
+    "imageSizePolicy": "exact_supported_size_else_nearest_log_aspect_ratio",
     "titleMaxLength": 20,
     "descriptionMaxLength": 20,
     "tagMinimum": 5,

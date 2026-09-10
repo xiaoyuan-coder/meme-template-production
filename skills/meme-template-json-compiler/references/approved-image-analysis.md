@@ -2,7 +2,7 @@
 
 ## 事实边界
 
-视觉语义输入只有 Approved Template Image envelope 和它指向的图片。不读取来源图、换图策略、第一 Skill Prompt、供应商结果、替换池或批次语义。数据台可通过独立 runtime envelope 提供 `existingKey/sourceIdentity`，这些字段只参与注册表查询。
+视觉语义输入为选定的已批准图片。直接入口允许先基于用户明确批准的本地图片分析，批准与文件摘要的绑定见 [direct-input.md](direct-input.md)；正式编译前取得相同字节的 Approved Template Image envelope。不读取来源图、换图策略、第一 Skill Prompt、供应商结果、替换池或批次语义。`existingKey` 用于继续同一模板，`sourceIdentity` 只作来源证据，`templateDataRoot` 指向第二 Skill 的便携正式数据。
 
 ## 分析顺序
 

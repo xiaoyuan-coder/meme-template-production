@@ -1,6 +1,6 @@
 ---
 name: meme-template-json-compiler
-description: 将已审核并上传的模板图独立分析为可复用的 Gallery v2 模板 JSON。用于模板玩法分析、可编辑槽位设计、模板文案与运行语义编译、批量交付及 JSON 局部返修。
+description: 将用户批准的本地图片或已上传模板图独立分析为可复用的 Gallery v2 模板 JSON，支持直接从本 Skill 开始。用于模板玩法分析、可编辑槽位设计、模板文案与运行语义编译、按名称或 key 定位当前模板、批量交付及 JSON 局部返修。
 ---
 
 # 模板 JSON 编译器
@@ -11,15 +11,20 @@ description: 将已审核并上传的模板图独立分析为可复用的 Galler
 
 ## 输入与职责
 
-视觉语义只来自 Approved Template Image v2 envelope 所指向的已批准图片。独立查看该图，不消费来源图分析、替换策略、生成提示词、供应商数据或批次推理。数据台可另行提供 runtime envelope，源身份仅用于 key 解析。
+支持两种输入：用户在当前对话中明确批准的本地 PNG，以及 Approved Template Image v2 envelope 所指向的已批准图片。视觉语义只来自选定图片。独立查看该图，不消费来源图分析、替换策略、生成提示词、供应商数据或批次推理。Key 是模板身份；源身份只作来源证据。
 
-本 Skill 交付正式 `<key>.json`：`cover`、`referenceImage` 原样复用输入 URL，首次与返修均省略 `imageUrl`。模板图生产与上传由第一 Skill 负责，氛围图由 `template-atmosphere-image-producer` 负责。
+本 Skill 交付正式 `<key>.json`：`cover`、`referenceImage` 原样复用输入 URL，首次与返修均省略 `imageUrl`。上游路径的模板图生产与上传由第一 Skill 负责；直接入口通过本 Skill 的适配器发布已批准原图，不调用图像生产。氛围图由 `template-atmosphere-image-producer` 负责。
 
-## 开始前
+## 任务路由
 
-确认 `requirements.txt` 声明的依赖可用，再调用 `scripts/compiler.py`；缺少依赖时报告所缺项，不自动安装。通过 `validate_approved_image_envelope` 校验 v2 `approved_uploaded` envelope 及不可变 URL。
+先判断任务类型，再读取对应资料：
 
-首次编译直接进入主流程。局部返修先执行下文“JSON 返修”的基线与范围准备，再沿主流程重建证据。
+- **修改已有模板数据**：先读取 [current-version-registry.md](references/current-version-registry.md) 和 [返修与读回校验.md](references/返修与读回校验.md)。用名称或已知 key 定位 `templateDataRoot` 中的 current 正式 JSON，再判断采用轻量数据修订或完整重分析。截图提供视觉证据，不承担数据寻址。
+- **从本地图片创建模板**：读取 [direct-input.md](references/direct-input.md)。用户已明确批准该图片时记录批准证据，进入独立分析；正式交付前按适配流程发布原图，在 `templateDataRoot` 中建立新 key。
+- **从已上传图片创建模板**：通过 `validate_approved_image_envelope` 校验 v2 `approved_uploaded` envelope，随后进入主流程。
+- **核对工作台最新版本**：仅在用户要求工作台同步或读回时，采集列表、详情、编辑预览和导出数据。该分支不阻塞便携正式交付。
+
+缺少依赖时报告所缺项，不自动安装。两个新建入口共用全部视觉分析、语义复核和正式编译门禁。参考图实际尺寸保存于 envelope；生成画布 `imageSize` 由 `select_generation_image_size` 选择，不修改参考图字节。
 
 ## 主流程
 
@@ -53,29 +58,31 @@ description: 将已审核并上传的模板图独立分析为可复用的 Galler
 
 ### 4. 解析 key，校验并自复核
 
-读取 [key-registry.md](references/key-registry.md)，通过 `KeyRegistryReader.resolveTemplateKey(request)` 取得决议。文件名、目录、标题、相似度和图片 SHA 均不能代替源身份；冲突或注册表不可用只暂停当前项。
+读取 [key-registry.md](references/key-registry.md)，通过 `resolve_template_key(templateDataRoot, proposedKey, existing_key=...)` 取得决议。新建 key 必须未被占用；返修显式复用已有 key。标题、图片、来源身份和 SHA 都不改变 key 身份。
 
 读取 [gallery-v2.md](references/gallery-v2.md)，按固定 Schema 与生产约束校验草稿。执行分析规范中的同轮 self-review：每项有具体证据，绑定最终草稿 SHA；修改后重新复核。
 
-语义复核需实际代入不同推荐值，检查新内容能否生效、玩法是否保留、其他字段是否仍锁定旧内容。机器校验与语义判断分别完成。全部通过后，首次编译调用 `compile_final_json`，返修调用 `compile_json_revision`，不增加 JSON 人工批准停点。
+语义复核需实际代入不同推荐值，检查新内容能否生效、玩法是否保留、其他字段是否仍锁定旧内容。机器校验与语义判断分别完成。全部通过后，首次编译调用 `compile_final_json`，换图或完整重分析返修调用 `compile_template_revision`，不换图的 JSON 返修调用 `compile_json_revision` 或轻量入口。
 
 ### 5. 交付正式数据
 
-每次交付读取 [portable-delivery.md](references/portable-delivery.md)。调用 `write_formal_json` 写入独立 revision 位置，再调用 `write_production_index` 更新索引。每模板目录只含一个裸 JSON；分析、自复核、注册表证据及状态置于目录外。
+每次交付读取 [portable-delivery.md](references/portable-delivery.md)。调用 `write_formal_json` 和 `write_production_index` 保留本次运行证据，再调用 `publish_template(templateDataRoot, formal, ...)` 产生自包含历史并原子替换同 key current。用户未指定时要求选择一个可持久化的 `templateDataRoot`；工作台不是交付前置条件。
 
-报告已交付 key、修订身份与索引入口。涉及工作台的任务继续执行读回分支；交付完成与工作台更新分别确认。
+报告已交付 key、revision、历史入口与 `templateDataRoot` current 状态。涉及工作台的任务继续执行可选读回分支；便携正式交付与工作台更新分别确认。
 
 ## 条件分支
 
 ### JSON 返修
 
-先读取 [返修与读回校验.md](references/返修与读回校验.md)，取得当前交付、原批准图片和请求证据。修改前声明 scope，以完整上一版摘要绑定；保留未涉及的槽位、绑定和字段，随后沿主流程完成新草稿及自复核。
+按名称或 key 调用 `locate_current_template` 取得 `templateDataRoot` 中的 current 正式 JSON 和请求证据。若该 key 尚未进入便携数据根，按 current 规范执行一次性基线登记；候选版本存在冲突时列出候选并请用户确认。修改前声明 scope，以完整上一版摘要绑定；保留未涉及的槽位、绑定和字段。
 
-注册表需确认 `EXISTING_SAME_SOURCE`。上一版含氛围图字段时保持原对象只读，新产物遵循本 Skill 的字段边界。缺少可靠基线时暂停该项。用户要求换模板图时，仅将该项转回第一 Skill，取得新批准 envelope 后继续。
+标题、描述、标签、槽位、Prompt 或运行语义的定向修复，在现有正式 JSON 仍符合 v2 图片地址合同时，完成图像证据与四项修订复核后调用 `compile_data_revision`，无需重新执行本地图片准入、上传和完整分析。玩法结构不清、需要新增或重构控制、或用户要求换图时，沿主流程重建完整证据并调用 `compile_template_revision`。
+
+key 解析需确认 `EXISTING_KEY`，发布时提供编辑基线的 current SHA。上一版含氛围图字段时保持原对象只读，新产物遵循本 Skill 的字段边界。现有正式对象不符合当前合同且修复范围超出用户请求时，报告具体合同差异并请求迁移策略，不自行引入环境名称或地址迁移规则。用户提供新批准原图时走直接入口；需要生成新图时转回第一 Skill。
 
 ### 工作台读回
 
-任务包含工作台交付时，读取 [返修与读回校验.md](references/返修与读回校验.md)。由数据台根据生产记录选择当前修订、采集实际观察，再调用 `validate_delivery_readback` 校验列表、详情、编辑预览和导出。
+用户要求同步或核对工作台时，读取 [返修与读回校验.md](references/返修与读回校验.md)。以 `templateDataRoot` current 为基准采集工作台实际观察，再调用 `validate_delivery_readback` 校验列表、详情、编辑预览和导出。
 
 选版与读回均通过后才报告工作台已更新。入口不可用或内容过期时保留正式交付，标注读回待完成；较新的未交付修改继续显示待处理状态。
 

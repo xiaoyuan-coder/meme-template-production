@@ -20,6 +20,7 @@ tmp/
 cache/
 secrets/
 real-assets/
+local-data/
 *.log
 
 # Personal research and historical working documents stay local.

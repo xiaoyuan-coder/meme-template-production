@@ -1,0 +1,4 @@
+-r requirements.txt
+Pillow>=11,<13
+oss2>=2.19,<3
+certifi>=2025.8.3

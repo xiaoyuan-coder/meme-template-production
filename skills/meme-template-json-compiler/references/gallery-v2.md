@@ -7,3 +7,5 @@ Compile `inputSchema.version=2` and `runtimeSemantics.version=2`. Every `replace
 The Memebuy monorepo is an upgrade source only. Every upgrade adds a new immutable version directory, records its digest, performs a contract diff, and updates the repository release contract. Never read desktop absolute paths, `current`, or `latest` during production. Old snapshots remain migration fixtures only.
 
 The shared snapshot permits optional `imageUrl` for downstream atmosphere delivery. The stricter second-stage whitelist excludes it entirely, both on initial compilation and revision. Only the atmosphere-image producer adds the field after human selection and OSS readback.
+
+The reference image may have any positive pixel dimensions. `imageSize` is the generation canvas selected by `select_generation_image_size`; exact supported sizes are preserved and other sizes map to the closest supported aspect ratio. Reference bytes, SHA-256, URL and actual dimensions remain unchanged. This authoring-policy change does not alter the frozen Gallery schema or approved-image envelope v2.

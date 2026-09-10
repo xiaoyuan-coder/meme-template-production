@@ -8,6 +8,8 @@
     "schemaVersion": {"const": 1},
     "itemId": {"type": "string", "minLength": 1},
     "existingKey": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,59}$"},
+    "templateDataRoot": {"type": "string", "minLength": 1, "description": "Portable formal template data root owned by the production workflow."},
+    "currentRegistryRoot": {"type": "string", "minLength": 1, "description": "Deprecated compatibility alias for templateDataRoot."},
     "sourceIdentity": {
       "type": "object",
       "additionalProperties": false,

@@ -14,7 +14,7 @@
 
 ## key、title 与 description
 
-key 从核心机制、动作、关系、容器或稳定视觉钩子生成小写 kebab-case 候选。去掉默认身份、开放文字、素材号、目录号、批次、日期、revision 和随机串。候选 key 只能通过 KeyRegistryReader 获得运行决议。
+key 从核心机制、动作、关系、容器或稳定视觉钩子生成小写 kebab-case 候选。去掉默认身份、开放文字、素材号、目录号、批次、日期、revision 和随机串。候选 key 通过 `resolve_template_key` 在稳定 `templateDataRoot` 中获得决议；正式发布后 key 成为模板身份并保持不变。
 
 title 使用用户能直接理解、愿意点开的稳定玩法名。优先写场景、情绪、动作或反差钩子，使用日常口语，避免把标题写成图像分析结论或槽位操作说明。例如“抱着它睡着了”比“困到抱住手边的东西”更自然，也更有记忆点。开放槽全部换成最大差异合法值后，title 仍应成立；开放的 IP、姓名、年龄、性别、物种、发型、服装、颜色和文字不得写入 title。
 
@@ -132,6 +132,6 @@ Prompt Template 是给用户看的“这张图可以怎么改”。使用 1–3 
 
 ## cover、referenceImage、imageUrl 与 imageSize
 
-`imageSize` 精确读取 Approved Image 宽高，必须等于正式尺寸枚举之一。`cover` 与 `referenceImage` 始终相等，并逐字复用 Approved Template Image v2 已携带的 immutable OSS URL；编译器不得自行推导或改写 URL。
+Approved Image 的 `width/height` 保存参考图实际尺寸。`imageSize` 表示生成画布，调用 `select_generation_image_size(width, height)`：已有合法精确尺寸原样保留，其余按宽高比的对数距离选取最接近的正式枚举，平局按枚举顺序。此选择不缩放、裁切或重新编码参考图。`cover` 与 `referenceImage` 始终相等，并逐字复用 Approved Template Image v2 已携带的 immutable OSS URL；编译器不得自行推导或改写 URL。
 
 第二 Skill 的首次与返修交付均省略 `imageUrl`。第三个氛围图 Skill 在人工选定最终图、OSS 上传与公开读回完成后添加该字段。返修读取含该字段的存量对象时，保留原文件和完整摘要，输出只含第二阶段字段。

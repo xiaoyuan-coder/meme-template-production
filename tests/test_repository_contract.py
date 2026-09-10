@@ -15,6 +15,9 @@ class RepositoryContractTests(unittest.TestCase):
         json_requirements = (
             ROOT / "skills/meme-template-json-compiler/requirements.txt"
         ).read_text(encoding="utf-8").splitlines()
+        direct_requirements = (
+            ROOT / "skills/meme-template-json-compiler/requirements-direct.txt"
+        ).read_text(encoding="utf-8").splitlines()
         atmosphere_requirements = (
             ROOT / "skills/template-atmosphere-image-producer/requirements.txt"
         ).read_text(encoding="utf-8").splitlines()
@@ -22,6 +25,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("httpx>=0.28,<1", image_requirements)
         self.assertIn("oss2>=2.19,<3", image_requirements)
         self.assertNotIn("oss2>=2.19,<3", json_requirements)
+        self.assertIn("certifi>=2025.8.3", direct_requirements)
         self.assertIn("oss2>=2.19,<3", atmosphere_requirements)
         self.assertIn("certifi>=2025.8.3", atmosphere_requirements)
 
@@ -68,6 +72,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn(".DS_Store", patterns)
         self.assertIn("__pycache__/", patterns)
         self.assertIn("*.pyc", patterns)
+        self.assertIn("local-data/", patterns)
 
     def test_json_compiler_is_self_contained_when_installed_alone(self):
         skill = ROOT / "skills/meme-template-json-compiler"
@@ -113,6 +118,10 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertEqual(
             (compiler / "data-workbench-runtime-envelope.schema.json").read_bytes(),
             (shared / "data-workbench-runtime-envelope.schema.json").read_bytes(),
+        )
+        self.assertEqual(
+            (compiler / "current-template-registry.schema.json").read_bytes(),
+            (shared / "current-template-registry.schema.json").read_bytes(),
         )
 
 

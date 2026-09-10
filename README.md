@@ -8,7 +8,9 @@
 | meme-template-json-compiler | 独立分析已批准图片，编译可复用的 Gallery v2 模板 JSON | [README.md](skills/meme-template-json-compiler/README.md) |
 | template-atmosphere-image-producer | 根据正式模板生成产品生活方式图，审核后上传并回填氛围图地址 | [SKILL.md](skills/template-atmosphere-image-producer/SKILL.md) |
 
-第二 Skill 的首次与返修交付均省略 `imageUrl`，该字段由第三 Skill 添加。`cover` 与 `referenceImage` 使用已批准模板图地址。
+第二 Skill 的首次与返修交付均省略 `imageUrl`，该字段由第三 Skill 添加。`cover` 与 `referenceImage` 使用已批准模板图地址。第二 Skill 以 key 为模板身份，在独立便携 `templateDataRoot` 中维护 history 和 current；工作台为可选读取方。
+
+本地正式数据不进入源码版本库。第二 Skill 使用跨运行稳定的便携 `templateDataRoot`；需要放在本仓库时统一置于被忽略的 `local-data/`。批次过程数据继续置于被忽略的 `runs/` 和 `outputs/`。
 
 ## 使用
 
@@ -17,7 +19,7 @@
 ## 仓库结构
 
 - `skills/`：Skill 指令、参考资料、执行脚本与独立测试。
-- `contracts/`：共享合同、固定版本 Schema 与规则实现映射。
+- `contracts/`：共享合同、固定版本 Schema、current 注册表合同与规则实现映射。
 - `tests/`：合同、编译、文件写入及安装验证。
 - `scripts/`：仓库维护工具。
 - `CONTEXT.md`：业务领域术语。

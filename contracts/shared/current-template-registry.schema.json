@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.memebuy.cn/current-template-registry-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "updatedAt", "records"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "chainId", "revision", "formalJsonRef", "formalJsonSha256", "sourceImageSha256", "objectRef", "currentTemplateRef", "promotedAt"],
+        "properties": {
+          "key": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "chainId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "formalJsonRef": {"type": "string", "pattern": "^(artifact|delivery|history)://"},
+          "formalJsonSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "sourceImageSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "objectRef": {"type": "string", "pattern": "^objects/[a-f0-9]{64}\\.json$"},
+          "currentTemplateRef": {"type": "string", "pattern": "^current/templates/[a-z0-9]+(?:-[a-z0-9]+)*\\.json$"},
+          "promotedAt": {"type": "string", "format": "date-time"}
+        }
+      }
+    }
+  }
+}

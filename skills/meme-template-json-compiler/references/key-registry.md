@@ -1,9 +1,25 @@
-# Read-only key registry
+# Key 身份与解析
 
-Use only `KeyRegistryReader.resolveTemplateKey(request)`. The request contains `proposedKey`, optional `existingKey`, and optional `sourceIdentity={namespace, sourceAssetId, sourceSha256?}`. The response contains `registryRevision`, `decision`, `resolvedKey`, `matchedBy`, and `evidence`.
+Key 是模板的稳定身份。标题、图片、槽位、Prompt 和其他正式字段可随 revision 变化；同一 key 的新版本替换 current，key 保持不变。`sourceIdentity` 和图片 SHA 是来源与完整性证据，不承担模板身份判定。
 
-Allowed decisions are `NEW`, `EXISTING_SAME_SOURCE`, `KEY_COLLISION`, `SOURCE_CONFLICT`, and `REGISTRY_UNAVAILABLE`. Canonical source identity is `namespace + sourceAssetId`. `sourceSha256` provides integrity evidence or matches an explicitly registered legacy alias. It never replaces the canonical pair.
+## 便携解析
 
-An `existingKey` must be confirmed by the registry. Filenames, directory numbers, batch IDs, titles, semantic similarity, and Approved Image SHA cannot establish common source. Registry unavailability or conflict pauses only that item.
+读取 [current-version-registry.md](current-version-registry.md) 指定的稳定 `templateDataRoot`，调用 `scripts/current_registry.py` 的：
 
-Formal online resolution uses `MemeAdminKeyRegistryClient` with an explicitly supplied local base URL. It sends `POST /api/v1/template-key-registry/resolve`, JSON request/response, and no credential or write method. The endpoint returns HTTP 200 with the five-field response even for `KEY_COLLISION`, `SOURCE_CONFLICT`, or `REGISTRY_UNAVAILABLE`; malformed responses fail the current item. `SnapshotKeyRegistryReader` remains the portable/offline adapter. This repository owns the client, schemas, and seam only; meme-admin owns the read-only server implementation and registry storage.
+```python
+decision = resolve_template_key(
+    template_data_root,
+    proposed_key,
+    existing_key=existing_key_or_none,
+)
+```
+
+- 新建时不传 `existing_key`。key 未被占用返回 `NEW`；已存在返回 `KEY_COLLISION`，不默认覆盖。
+- 返修或换图时显式传入同一 `existing_key`。它存在且与 `proposed_key` 一致时返回 `EXISTING_KEY`。
+- `KEY_CONFLICT` 表示用户指定的旧 key 不存在或与草稿 key 不一致。
+
+文件名、目录号、批次、标题、图片 URL 和 SHA 均不代替 key。只给标题时先在 current 中精确查找；标题重名时由用户选择 key。
+
+## 可选外部适配
+
+`MemeAdminKeyRegistryClient` 与 `SnapshotKeyRegistryReader` 保留为旧数据迁移或外部目录查询适配器。它们不是生产前置条件，也不得覆盖 `templateDataRoot` 内以 key 为身份的 current 事实。旧决议 `EXISTING_SAME_SOURCE` 仅用于兼容已有适配器。

@@ -5,8 +5,10 @@
 ## 任务边界
 
 - 从已批准图片独立建立视觉语义。来源图分析、替换策略和生成提示词不作为分析输入。
-- 使用独立运行上下文中的源身份解析 key；身份信息仅参与注册表解析。
-- 正式交付仅包含本 Skill 的字段。`cover`、`referenceImage` 复用上游 URL；`imageUrl` 由氛围图 Skill 管理。
+- Key 是模板身份；源身份和图片 SHA 只作来源与完整性证据。
+- 已有模板按名称或 key 定位，稳定 `templateDataRoot` 决定正式当前版本；截图和图片 URL 不参与数据寻址。
+- `templateDataRoot` 由第二 Skill 自主维护，工作台为可选消费方。本仓库内的本地数据只放入被忽略的 `local-data/`、`runs/` 或 `outputs/`。
+- 正式交付仅包含本 Skill 的字段。`cover`、`referenceImage` 复用已验证 envelope 的 URL；直接本地入口见 `references/direct-input.md`；`imageUrl` 由氛围图 Skill 管理。
 
 ## 分析与编译
 
@@ -14,12 +16,15 @@
 - 槽位选择同时满足用户动机、独立选择、明显变体、结果可见、模型可控和机制保持。单槽需有完整覆盖证据，最多四槽。
 - 每槽支持文字、自定义输入和三个推荐项；图片能力按目标映射决定。
 - Prompt Template、槽位和运行语义来自同一分析，保持输入绑定及可编辑内容一致。
-- 使用 `compile_final_json` 或 `compile_json_revision` 完成校验后，再调用 `write_formal_json`。草稿变化后重新执行自复核。
+- 首次使用 `compile_final_json`，不换图返修使用 `compile_json_revision`，换图或完整重构使用 `compile_template_revision`。校验后再写入正式数据，草稿变化后重新执行自复核。
 
 ## 返修与交付
 
 - 修改范围从用户请求确定，以完整上一版 JSON 摘要绑定；未涉及的字段、槽位和绑定保持原值。
+- 现有 v2 正式 JSON 的定向数据修订优先使用 `compile_data_revision`；合同外迁移需要用户或既有合同明确授权。
 - 上一版作为只读基线。新修订使用独立交付位置，正式模板目录仅保留一个 `<key>.json`。
+- 历史交付和生产索引写入后，用 `publish_template` 原子替换同 key current；工作台只消费摘要校验通过的 current object。
+- current 缺失时只登记一个已验证的权威基线；多个不同候选交由用户或数据台确认。
 - 分析、自复核、注册表证据和运行状态放在正式模板目录之外。
 - key 冲突、校验失败或写入冲突只暂停当前项，按对应原因恢复。
 - 工作台读回使用真实采集的列表、详情、编辑预览和导出数据；交付完成与读回完成分别报告。

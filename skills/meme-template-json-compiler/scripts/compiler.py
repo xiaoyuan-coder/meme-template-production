@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import tempfile
@@ -273,6 +274,21 @@ def validate_approved_image_envelope(envelope: Mapping[str, Any]) -> None:
         f"{_contract()['imageAsset']['pathPrefix']}{image['sha256']}.png"
     ):
         raise ContractError("approved image URI and SHA-256 identity differ")
+
+
+def select_generation_image_size(width: int, height: int) -> str:
+    """Select an output canvas without changing the approved reference bytes."""
+    if type(width) is not int or type(height) is not int or width <= 0 or height <= 0:
+        raise ContractError("reference dimensions must be positive integers")
+    schema = json.loads((_SKILL_ROOT / "references/contracts/gallery-template.schema.json").read_text())
+    sizes = schema["properties"]["imageSize"]["enum"]
+    exact = f"{width}x{height}"
+    if exact in sizes:
+        return exact
+    def distance(size: str) -> float:
+        candidate_width, candidate_height = map(int, size.split("x"))
+        return abs(math.log((candidate_width / candidate_height) / (width / height)))
+    return min(sizes, key=distance)
 
 
 def _non_empty_text(value: Any, field: str) -> str:
@@ -711,9 +727,11 @@ def validate_authoring_contract(
         raise ContractError("title exceeds the stable user-facing limit")
     if len(description) > authoring["descriptionMaxLength"]:
         raise ContractError("description exceeds 20 characters")
-    expected_size = f"{approved_image['image']['width']}x{approved_image['image']['height']}"
+    expected_size = select_generation_image_size(
+        approved_image['image']['width'], approved_image['image']['height']
+    )
     if formal_draft.get("imageSize") != expected_size:
-        raise ContractError("imageSize must match the Approved Template Image dimensions")
+        raise ContractError("imageSize must match the selected generation canvas for the approved reference")
     tags = formal_draft.get("metadata", {}).get("tags")
     if not isinstance(tags, list) or not authoring["tagMinimum"] <= len(tags) <= authoring["tagMaximum"]:
         raise ContractError("metadata.tags must contain 5–8 items")
@@ -1197,7 +1215,7 @@ def compile_final_json(
     validate_approved_image_envelope(approved_image)
     validate_authoring_contract(analysis, formal_draft, approved_image)
     _validate_registry_response(registry_response)
-    if registry_response.get("decision") not in {"NEW", "EXISTING_SAME_SOURCE"}:
+    if registry_response.get("decision") not in {"NEW", "EXISTING_KEY", "EXISTING_SAME_SOURCE"}:
         raise ContractError("key resolution pauses this item")
     if formal_draft.get("key") != registry_response.get("resolvedKey"):
         raise ContractError("formal key differs from registry resolution")
@@ -1224,6 +1242,8 @@ def validate_revision_scope(
     previous_formal: Mapping[str, Any],
     revised_formal: Mapping[str, Any],
     scope: Mapping[str, Any],
+    *,
+    allow_image_change: bool = False,
 ) -> None:
     """Reject changes outside a request-derived scope bound to the prior delivery."""
     # A prior workbench object may already carry the third Skill's field.
@@ -1247,9 +1267,13 @@ def validate_revision_scope(
             raise ContractError("revision scope lists must be unique")
     if not scope["requestEvidence"]:
         raise ContractError("revision scope requires the user request evidence")
-    for field in ("key", "cover", "referenceImage"):
-        if previous_formal[field] != revised_formal[field]:
-            raise ContractError("JSON-only revision must preserve key and image URLs")
+    if previous_formal["key"] != revised_formal["key"]:
+        raise ContractError("template revision must preserve key identity")
+    if not allow_image_change and any(
+        previous_formal[field] != revised_formal[field]
+        for field in ("cover", "referenceImage")
+    ):
+        raise ContractError("JSON-only revision must preserve image URLs")
 
     before = previous_stage_two
     after = deepcopy(dict(revised_formal))
@@ -1290,11 +1314,68 @@ def compile_json_revision(
     registry_response: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Compile and check a JSON-only revision before any delivery write."""
-    if registry_response.get("decision") != "EXISTING_SAME_SOURCE":
-        raise ContractError("JSON-only revision requires an existing source identity")
+    if registry_response.get("decision") not in {"EXISTING_KEY", "EXISTING_SAME_SOURCE"}:
+        raise ContractError("JSON-only revision requires an existing key")
     revised = compile_final_json(approved_image, analysis, formal_draft, registry_response)
     validate_revision_scope(previous_formal, revised, scope)
     return revised
+
+
+def compile_template_revision(
+    previous_formal: Mapping[str, Any],
+    scope: Mapping[str, Any],
+    approved_image: Mapping[str, Any],
+    analysis: Mapping[str, Any],
+    formal_draft: Mapping[str, Any],
+    registry_response: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Compile a full same-key revision that may use a newly approved image."""
+    if registry_response.get("decision") not in {"EXISTING_KEY", "EXISTING_SAME_SOURCE"}:
+        raise ContractError("template revision requires an existing key")
+    revised = compile_final_json(approved_image, analysis, formal_draft, registry_response)
+    validate_revision_scope(previous_formal, revised, scope, allow_image_change=True)
+    return revised
+
+
+def _validate_data_revision_review(
+    revised_formal: Mapping[str, Any], review: Mapping[str, Any]
+) -> None:
+    required = {"status", "reviewedFormalSha256", "evidenceRefs", "checks"}
+    if not isinstance(review, Mapping) or set(review) != required:
+        raise ContractError("data revision review fields are incomplete")
+    if review["status"] != "passed" or review["reviewedFormalSha256"] != sha256_json(revised_formal):
+        raise ContractError("data revision review is stale or did not pass")
+    evidence = review["evidenceRefs"]
+    if not isinstance(evidence, list) or not evidence or any(
+        not isinstance(item, str) or not item.strip() for item in evidence
+    ):
+        raise ContractError("data revision review requires visual or request evidence")
+    required_checks = {
+        "requestScope", "visualEvidence", "mediumConstraint", "runtimeConsistency"
+    }
+    checks = review["checks"]
+    if not isinstance(checks, Mapping) or set(checks) != required_checks or not all(
+        value is True for value in checks.values()
+    ):
+        raise ContractError("data revision review requires every deterministic check")
+
+
+def compile_data_revision(
+    previous_formal: Mapping[str, Any],
+    scope: Mapping[str, Any],
+    revised_formal: Mapping[str, Any],
+    registry_response: Mapping[str, Any],
+    review: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Compile a scoped data repair without re-running approved-image intake."""
+    _validate_registry_response(registry_response)
+    if registry_response.get("decision") not in {"EXISTING_KEY", "EXISTING_SAME_SOURCE"}:
+        raise ContractError("data revision requires an existing key")
+    if revised_formal.get("key") != registry_response.get("resolvedKey"):
+        raise ContractError("data revision key differs from registry resolution")
+    validate_revision_scope(previous_formal, revised_formal, scope)
+    _validate_data_revision_review(revised_formal, review)
+    return deepcopy(dict(revised_formal))
 
 
 def validate_delivery_readback(
@@ -1315,7 +1396,7 @@ def validate_delivery_readback(
     if type(revision) is not int or revision < 1:
         raise ContractError("delivery revision must be a positive integer")
     if not isinstance(delivery_identity["formalJsonRef"], str) or not re.fullmatch(
-        r"(?:artifact|delivery)://\S+", delivery_identity["formalJsonRef"]
+        r"(?:artifact|delivery|history)://\S+", delivery_identity["formalJsonRef"]
     ):
         raise ContractError("delivery requires a portable formal JSON reference")
     surfaces = _contract()["deliveryReadback"]["surfaceFields"]
@@ -1368,7 +1449,7 @@ def _validate_registry_response(response: Mapping[str, Any]) -> None:
         raise ContractError("registry matchedBy must be unique")
     if not isinstance(response["evidence"], list) or not all(isinstance(x, Mapping) for x in response["evidence"]):
         raise ContractError("invalid registry evidence")
-    if response["decision"] in {"NEW", "EXISTING_SAME_SOURCE"} and resolved is None:
+    if response["decision"] in {"NEW", "EXISTING_KEY", "EXISTING_SAME_SOURCE"} and resolved is None:
         raise ContractError("successful key decision requires resolvedKey")
 
 

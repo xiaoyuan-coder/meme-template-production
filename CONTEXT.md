@@ -16,6 +16,14 @@ _Avoid_: Execution shard, arbitrary batch, one design repeated with different su
 An in-app reusable image experience made of an approved template image, a user-facing Prompt Template, structured slots, and backend visual semantics.
 _Avoid_: Prompt, reference image
 
+**Template Key**:
+The stable identity of a Template. A new revision with the same key replaces that Template's current version even when its title, image, slots, or semantics change.
+_Avoid_: Source-image identity, revision identity, display title
+
+**Template Data Root**:
+The portable, persistent formal dataset maintained by the Template JSON Compiler, containing current Templates, immutable objects, and revision history. A workbench may consume it but does not own production.
+_Avoid_: Dated run directory, workbench-only registry
+
 **Atmosphere Image**:
 The single selected 3:4 lifestyle product photograph used to merchandise a Template. It is stored in the formal Template JSON as `imageUrl` after human selection and verified OSS readback.
 _Avoid_: Approved template artwork, an unreviewed candidate, a copied Good Case

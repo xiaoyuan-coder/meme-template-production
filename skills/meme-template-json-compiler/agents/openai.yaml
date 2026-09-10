@@ -1,4 +1,4 @@
 interface:
   display_name: "Meme Template JSON Compiler"
-  short_description: "Compile uploaded images directly into Gallery v2 JSON"
-  default_prompt: "Use $meme-template-json-compiler to compile uploaded approved template images and deliver final Gallery v2 JSON to the data dashboard."
+  short_description: "Compile and publish portable Gallery v2 templates by key"
+  default_prompt: "Use $meme-template-json-compiler to create or update a Gallery v2 template by stable key and publish it to a portable template data root."
