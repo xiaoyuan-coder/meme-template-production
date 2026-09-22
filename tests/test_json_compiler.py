@@ -741,6 +741,21 @@ class GalleryAndCompilationTests(unittest.TestCase):
         ):
             compiler.validate_authoring_contract(locked_analysis, locked, envelope)
 
+        locked_target = copy.deepcopy(draft)
+        locked_target["runtimeSemantics"]["targetInstances"][0]["role"] = "中央橘猫主体"
+        target_analysis = valid_approved_analysis(image_sha)
+        target_analysis["editableFactRouting"][0]["forbiddenRuntimeTerms"].append("橘猫")
+        target_analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(
+            locked_target["runtimeSemantics"]
+        )
+        target_analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(
+            locked_target
+        )
+        with self.assertRaisesRegex(
+            compiler.ContractError, "EDITABLE_FACT_LOCKED_IN_RUNTIME_SEMANTICS"
+        ):
+            compiler.validate_authoring_contract(target_analysis, locked_target, envelope)
+
     def test_editable_fact_dependency_closure_is_machine_gated(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {

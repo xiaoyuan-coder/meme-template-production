@@ -93,7 +93,7 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 | `locate_current_template` | 按稳定 key 或精确标题读取 current 正式 JSON |
 | `discover_bootstrap_candidates` | 从明确给出的历史根目录收集并按内容去重基线候选 |
 | `validate_delivery_readback` | 校验四个工作台入口的实际观察 |
-| `evaluate_template_regression_suite` | 用只读回归合同检查槽位、完整对象、开放事实和标签组装 |
+| `evaluate_template_regression_suite` | 用只读回归合同检查槽位、完整对象、完整 Runtime 开放事实、跨表面断言和标签组装 |
 | `process_batch` | 按项处理批次并隔离错误 |
 
 先调用编译函数，再写入正式文件。同内容写入可重复执行，异内容冲突保留原文件；新修订使用独立交付位置。

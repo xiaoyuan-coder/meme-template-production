@@ -82,7 +82,7 @@
 
 `semanticModel` 是 Prompt Template 与 runtimeSemantics 的共同中间模型。`compile_semantics_from_analysis` 同时投影两者，正式草稿与任一投影发生手工漂移即拒绝。
 
-每个槽位必须在 Prompt Template 中出现一次精确占位符；文字 fallback 与默认值一致。每个 input binding 恰好对应一个正式槽位。每个 identity target 都有完整重绘声明，每个图片槽位都有唯一素材源声明。`openVisualFacts` 不得出现在 visualContract；`editableFactRouting` 进一步覆盖自由编辑事实、同义残留和联动目标；`backendOnlyFacts` 必须进入 visualContract 且不得进入 Prompt Template。
+每个槽位必须在 Prompt Template 中出现一次精确占位符；文字 fallback 与默认值一致。每个 input binding 恰好对应一个正式槽位。每个 identity target 都有完整重绘声明，每个图片槽位都有唯一素材源声明。`openVisualFacts` 不得出现在 Runtime 自然语言表面；`editableFactRouting` 进一步覆盖自由编辑事实、同义残留和联动目标，并扫描 `targetInstances.role/region` 与 `visualContract`；`backendOnlyFacts` 必须进入 visualContract 且不得进入 Prompt Template。
 
 首次开放或返修新增槽位时，执行 [返修与读回校验.md](返修与读回校验.md) 的“开放新槽后的依赖复核”，检查目标定位等字段中残留的默认内容约束。
 

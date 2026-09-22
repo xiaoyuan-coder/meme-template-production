@@ -136,9 +136,9 @@ Prompt Template 是用户可以整段修改的内容层。用自然语言描述�
 
 ### editableFactRouting：属性唯一归属
 
-每个 Prompt 可编辑事实建立一条路由：`owner=slot` 时写明 `slotId` 及所有联动 `requiredTargetIds`；低频自由编辑项使用 `owner=prompt`。`promptTerms` 保存 Prompt 中可核对的当前值。槽位事实的 `forbiddenRuntimeTerms` 包含默认值、三个推荐项，并补充 visualContract 中可能锁回旧外观的同义语、颜色、形状或旧内容表达；Prompt 事实至少包含当前可编辑值及其同义表达。
+每个 Prompt 可编辑事实建立一条路由：`owner=slot` 时写明 `slotId` 及所有联动 `requiredTargetIds`；低频自由编辑项使用 `owner=prompt`。`promptTerms` 保存 Prompt 中可核对的当前值。槽位事实的 `forbiddenRuntimeTerms` 包含默认值、三个推荐项，并补充整个 Runtime 中可能锁回旧外观的同义语、颜色、形状或旧内容表达；扫描范围包括 `targetInstances.role/region` 与 `visualContract`。Prompt 事实至少包含当前可编辑值及其同义表达。
 
-同一视觉属性只有一个权限层：Prompt/slot 拥有的内容不进入 visualContract；Runtime 保存目标和依赖映射；visualContract 保存用户不需要修改的模板实现。例如“包装内容”替换为薯片时，包装袋和顶部露出的食物都属于同一依赖闭包，必须同时绑定。
+同一视觉属性只有一个权限层：Prompt/slot 拥有的内容不进入 Runtime 的自然语言约束；`targetInstances` 使用中性角色与相对位置定位目标，`inputBindings` 保存依赖映射，`visualContract` 保存用户不需要修改的模板实现。例如“包装内容”替换为薯片时，包装袋和顶部露出的食物都属于同一依赖闭包，必须同时绑定。
 
 ### 前台 Prompt 与后端约束的衔接
 
@@ -158,7 +158,7 @@ Prompt Template 是用户可以整段修改的内容层。用自然语言描述�
 
 ## 编译后自复核
 
-正式草稿完成后，在同一次 Codex 运行内进行一轮独立轻量复核。复核绑定草稿的规范化 SHA，逐项检查：好玩命题和用户重制愿望是否有图像根据，槽位召回是否覆盖八轴，每个槽位是否通过六项精度门禁，文字语义单元是否一致，图片模式和群组策略是否有充分理由，身份特征权限是否逐轴完整，文字路由是否完整，title 和 description 是否面向用户且有点击动机，Prompt 是否前台可读且占位符精确，推荐项是否可直接替换，Tags 是否含正式大类且具有检索意图，visualContract 是否保留玩法且给开放值留出变化空间。
+正式草稿完成后，在同一次 Codex 运行内进行一轮独立轻量复核。复核绑定草稿的规范化 SHA，逐项检查：好玩命题和用户重制愿望是否有图像根据，槽位召回是否覆盖八轴，每个槽位是否通过六项精度门禁，文字语义单元是否一致，图片模式和群组策略是否有充分理由，身份特征权限是否逐轴完整，文字路由是否完整，title 和 description 是否面向用户且有点击动机，Prompt 是否前台可读且占位符精确，推荐项是否可直接替换，Tags 是否含正式大类且具有检索意图，完整 Runtime 是否给开放值留出变化空间，以及 Prompt、target 与 Visual Contract 的空间描述是否一致。
 
 每个检查项保存 `passed=true` 和可定位的 `evidence` 列表。槽位召回引用八轴审查，槽位精度引用正式 slot ID，文字路由引用 text region ID；其余检查引用对应字段或分析事实。发现问题先修改草稿再重新复核；最新草稿 SHA 的全部检查通过后直接编译并交付。自复核不调用生图 API，也不创建人工审核点。
 

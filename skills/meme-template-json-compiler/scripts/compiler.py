@@ -453,7 +453,12 @@ def evaluate_editability_case(case: Mapping[str, Any]) -> dict[str, Any]:
     required = {
         "caseId", "promptTemplate", "visualContract", "inputBindings", "editableFacts"
     }
-    if not isinstance(case, Mapping) or set(case) != required:
+    allowed = required | {"targetInstances"}
+    if (
+        not isinstance(case, Mapping)
+        or not required.issubset(case)
+        or not set(case).issubset(allowed)
+    ):
         raise ContractError("editability case fields are incomplete")
     case_id = _non_empty_text(case["caseId"], "editability caseId")
     prompt = _non_empty_text(case["promptTemplate"], "editability promptTemplate")
@@ -467,6 +472,12 @@ def evaluate_editability_case(case: Mapping[str, Any]) -> dict[str, Any]:
 
     findings: list[dict[str, Any]] = []
     leaves = _flatten_text_with_paths(case["visualContract"])
+    target_instances = case.get("targetInstances", [])
+    if not isinstance(target_instances, list) or any(
+        not isinstance(target, Mapping) for target in target_instances
+    ):
+        raise ContractError("editability targetInstances must be an array of objects")
+    leaves.extend(_flatten_text_with_paths(target_instances, "targetInstances"))
     fact_ids: set[str] = set()
     for fact in facts:
         if not isinstance(fact, Mapping):
@@ -504,7 +515,11 @@ def evaluate_editability_case(case: Mapping[str, Any]) -> dict[str, Any]:
             for path, text_value in leaves:
                 if term in text_value:
                     findings.append({
-                        "code": "EDITABLE_FACT_LOCKED_IN_VISUAL_CONTRACT",
+                        "code": (
+                            "EDITABLE_FACT_LOCKED_IN_VISUAL_CONTRACT"
+                            if path.startswith("visualContract")
+                            else "EDITABLE_FACT_LOCKED_IN_RUNTIME_SEMANTICS"
+                        ),
                         "factId": fact_id,
                         "term": term,
                         "path": path,
@@ -560,12 +575,17 @@ def evaluate_template_regression_suite(
     findings: list[dict[str, Any]] = []
     case_ids: set[str] = set()
     template_keys: set[str] = set()
-    expected_case_fields = {
+    required_case_fields = {
         "caseId", "templateKey", "expectedSlotIds", "completeObjectSlots",
         "editableFacts", "tagging",
     }
+    allowed_case_fields = required_case_fields | {"surfaceAssertions"}
     for case in cases:
-        if not isinstance(case, Mapping) or set(case) != expected_case_fields:
+        if (
+            not isinstance(case, Mapping)
+            or not required_case_fields.issubset(case)
+            or not set(case).issubset(allowed_case_fields)
+        ):
             raise ContractError("regression case fields are incomplete")
         case_id = _non_empty_text(case.get("caseId"), "regression caseId")
         template_key = _non_empty_text(case.get("templateKey"), "regression templateKey")
@@ -655,6 +675,7 @@ def evaluate_template_regression_suite(
                 "caseId": case_id,
                 "promptTemplate": template.get("promptTemplate"),
                 "visualContract": runtime.get("visualContract"),
+                "targetInstances": runtime.get("targetInstances", []),
                 "inputBindings": runtime.get("inputBindings"),
                 "editableFacts": editable_facts,
             })
@@ -664,6 +685,57 @@ def evaluate_template_regression_suite(
                     "caseId": case_id,
                     "templateKey": template_key,
                 })
+
+        surface_assertions = case.get("surfaceAssertions", [])
+        if not isinstance(surface_assertions, list):
+            raise ContractError("regression surfaceAssertions must be an array")
+        allowed_surface_paths = {
+            "promptTemplate": template.get("promptTemplate"),
+            "runtimeSemantics": template.get("runtimeSemantics"),
+            "runtimeSemantics.targetInstances": template.get("runtimeSemantics", {}).get(
+                "targetInstances", []
+            ),
+            "runtimeSemantics.visualContract": template.get("runtimeSemantics", {}).get(
+                "visualContract", {}
+            ),
+        }
+        asserted_paths: set[str] = set()
+        for assertion in surface_assertions:
+            if not isinstance(assertion, Mapping) or set(assertion) != {
+                "path", "requiredTerms", "forbiddenTerms"
+            }:
+                raise ContractError("regression surface assertion fields are invalid")
+            path = _non_empty_text(assertion.get("path"), "regression surface path")
+            if path not in allowed_surface_paths or path in asserted_paths:
+                raise ContractError("regression surface assertion path is invalid or duplicated")
+            asserted_paths.add(path)
+            for field in ("requiredTerms", "forbiddenTerms"):
+                terms = assertion.get(field)
+                if (
+                    not isinstance(terms, list)
+                    or len(terms) != len(set(terms))
+                    or any(not isinstance(term, str) or not term.strip() for term in terms)
+                ):
+                    raise ContractError("regression surface terms must be unique non-empty strings")
+            surface_text = _flatten_text(allowed_surface_paths[path])
+            for term in assertion["requiredTerms"]:
+                if term not in surface_text:
+                    findings.append({
+                        "code": "REGRESSION_SURFACE_TERM_MISSING",
+                        "caseId": case_id,
+                        "templateKey": template_key,
+                        "path": path,
+                        "term": term,
+                    })
+            for term in assertion["forbiddenTerms"]:
+                if term in surface_text:
+                    findings.append({
+                        "code": "REGRESSION_SURFACE_TERM_FORBIDDEN",
+                        "caseId": case_id,
+                        "templateKey": template_key,
+                        "path": path,
+                        "term": term,
+                    })
 
         tagging = case.get("tagging")
         if tagging is not None:
@@ -729,7 +801,7 @@ def _validate_editable_fact_routing(
         if not isinstance(prompt_terms, list) or not isinstance(forbidden_terms, list):
             raise ContractError("editable fact Prompt and Runtime terms must be arrays")
         if not set(prompt_terms).issubset(forbidden_terms):
-            raise ContractError("every editable Prompt term must be excluded from visualContract")
+            raise ContractError("every editable Prompt term must be excluded from runtime semantics")
         normalized_fact = {
             key: deepcopy(fact[key])
             for key in (
@@ -762,7 +834,7 @@ def _validate_editable_fact_routing(
         }
         if not slot_values.issubset(set(fact["forbiddenRuntimeTerms"])):
             raise ContractError(
-                "slot-owned editable facts must exclude all default and suggestion values from visualContract"
+                "slot-owned editable facts must exclude all default and suggestion values from runtime semantics"
             )
     covered_fact_ids = analysis["promptCoverage"].get("editableFactIds")
     if not isinstance(covered_fact_ids, list) or set(covered_fact_ids) != set(fact_ids):
@@ -772,6 +844,7 @@ def _validate_editable_fact_routing(
         "caseId": formal_draft["key"],
         "promptTemplate": formal_draft["promptTemplate"],
         "visualContract": formal_draft["runtimeSemantics"]["visualContract"],
+        "targetInstances": formal_draft["runtimeSemantics"]["targetInstances"],
         "inputBindings": formal_draft["runtimeSemantics"]["inputBindings"],
         "editableFacts": normalized,
     })
@@ -1744,6 +1817,10 @@ def validate_authoring_contract(
         raise ContractError("visual element routes must reference every editable fact")
     visual_contract = formal_draft["runtimeSemantics"]["visualContract"]
     visual_text = _flatten_text(visual_contract)
+    runtime_natural_text = _flatten_text({
+        "targetInstances": formal_draft["runtimeSemantics"]["targetInstances"],
+        "visualContract": visual_contract,
+    })
     for region in analysis["textRegions"]:
         exact_text = region["exactText"]
         action = region["action"]
@@ -1763,8 +1840,8 @@ def validate_authoring_contract(
             raise ContractError("backend-only facts must appear only in runtime visual semantics")
     for slot_id, evidence in slot_evidence.items():
         for fact in evidence["openVisualFacts"]:
-            if fact in visual_text:
-                raise ContractError(f"visualContract locks back an open value from {slot_id}")
+            if fact in runtime_natural_text:
+                raise ContractError(f"runtime semantics locks back an open value from {slot_id}")
             if fact in title:
                 raise ContractError(f"title locks back an open value from {slot_id}")
     _validate_editable_fact_routing(analysis, formal_draft)

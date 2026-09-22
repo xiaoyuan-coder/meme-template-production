@@ -2,7 +2,7 @@
 
 visualContract 用正向、可观察的后端语言保留模板的表现方式和玩法机制。它与 `inputBindings` 共同支持槽位输入及完整 Prompt 自由编辑：输入决定可替换内容，视觉约束保证这些内容进入同一个模板关系。
 
-visualContract 是固定模板实现层，保存媒介、画风、质感、光线、边缘处理及玩法必需的空间关系。Prompt Template 已开放的颜色、形状、物件、包装内容、背景或动作不再进入本字段。槽位默认值、推荐项、当前旧值及同义表达进入 `editableFactRouting.forbiddenRuntimeTerms`，编译门禁逐条检查残留。
+visualContract 是固定模板实现层，保存媒介、画风、质感、光线、边缘处理及玩法必需的空间关系。Prompt Template 已开放的颜色、形状、物件、包装内容、背景或动作不再进入本字段。槽位默认值、推荐项、当前旧值及同义表达进入 `editableFactRouting.forbiddenRuntimeTerms`，编译门禁在 `targetInstances.role/region` 与 visualContract 中逐条检查残留。
 
 编写、返修或复核运行语义时读取本规范。具体输入目标由 `inputBindings` 管理；本字段不新增绑定、不改变输入的控制范围。
 

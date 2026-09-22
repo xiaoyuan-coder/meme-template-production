@@ -13,6 +13,104 @@ compiler = load_module(
 
 
 class EditabilityBadcaseTests(unittest.TestCase):
+    def test_editability_rejects_forbidden_terms_in_target_role_and_region(self):
+        case = {
+            "caseId": "stale-target-copy",
+            "promptTemplate": (
+                '{{ headwear | "红色快餐帽" }}和{{ snack | "一盒薯条" }}'
+                '组成双宠快餐海报。'
+            ),
+            "visualContract": {
+                "composition": ["两个圆形头像并排，头饰、零食和主口号组成快餐海报。"],
+            },
+            "targetInstances": [{
+                "id": "headwear_target",
+                "role": "戴红帽一起应援的双人头饰",
+                "region": "两个头像上方的红帽区域",
+            }, {
+                "id": "snack_target",
+                "role": "左上方的薯条",
+                "region": "拱门旁的一盒薯条区域",
+            }],
+            "inputBindings": {
+                "headwear": {"targetIds": ["headwear_target"]},
+                "snack": {"targetIds": ["snack_target"]},
+            },
+            "editableFacts": [{
+                "factId": "headwear", "owner": "slot", "slotId": "headwear",
+                "promptTerms": ["红色快餐帽"],
+                "forbiddenRuntimeTerms": ["红色快餐帽", "红帽"],
+                "requiredTargetIds": ["headwear_target"],
+            }, {
+                "factId": "snack", "owner": "slot", "slotId": "snack",
+                "promptTerms": ["一盒薯条"],
+                "forbiddenRuntimeTerms": ["一盒薯条", "薯条"],
+                "requiredTargetIds": ["snack_target"],
+            }],
+        }
+
+        report = compiler.evaluate_editability_case(case)
+        self.assertFalse(report["passed"])
+        self.assertEqual(
+            {finding["code"] for finding in report["findings"]},
+            {"EDITABLE_FACT_LOCKED_IN_RUNTIME_SEMANTICS"},
+        )
+        self.assertEqual(
+            {finding["term"] for finding in report["findings"]},
+            {"红帽", "一盒薯条", "薯条"},
+        )
+        self.assertTrue(all(
+            finding["path"].startswith("targetInstances[")
+            for finding in report["findings"]
+        ))
+
+    def test_regression_surface_assertions_catch_prompt_and_spatial_drift(self):
+        template = {
+            "key": "scrapbook-fixture",
+            "promptTemplate": "主体坐在左下，使用单色网点，愿望物件散落四周。",
+            "inputSchema": {"slots": []},
+            "runtimeSemantics": {
+                "inputBindings": {},
+                "targetInstances": [{
+                    "id": "subject_target",
+                    "role": "中央主体",
+                    "region": "画面中央偏左",
+                }],
+                "visualContract": {
+                    "composition": ["主体位于中央偏右。"],
+                    "relations": ["右下心形照片压在前景。"],
+                },
+            },
+            "metadata": {"tags": []},
+        }
+        suite = {
+            "suiteId": "cross-surface-drift",
+            "cases": [{
+                "caseId": "scrapbook",
+                "templateKey": "scrapbook-fixture",
+                "expectedSlotIds": [],
+                "completeObjectSlots": [],
+                "editableFacts": [],
+                "tagging": None,
+                "surfaceAssertions": [{
+                    "path": "promptTemplate",
+                    "requiredTerms": ["中央偏左"],
+                    "forbiddenTerms": ["左下", "单色网点"],
+                }, {
+                    "path": "runtimeSemantics",
+                    "requiredTerms": ["中央偏左"],
+                    "forbiddenTerms": ["中央偏右", "心形照片"],
+                }],
+            }],
+        }
+
+        report = compiler.evaluate_template_regression_suite([template], suite)
+        self.assertFalse(report["passed"])
+        self.assertEqual(
+            {finding["code"] for finding in report["findings"]},
+            {"REGRESSION_SURFACE_TERM_MISSING", "REGRESSION_SURFACE_TERM_FORBIDDEN"},
+        )
+
     def test_regression_suite_rejects_missing_case_partial_object_and_tag_drift(self):
         heart = {
             "key": "heart-card-fixture",
