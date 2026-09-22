@@ -53,8 +53,8 @@ description: 将用户批准的本地图片或已上传模板图独立分析为�
 - 每槽可选、支持自定义文字，并有三个与默认值同轴、同颗粒度、同语言及表达形式的推荐项；图片是附加能力。
 - Prompt Template 只描述开放给用户修改的画面内容，用容易理解的自然语言完整覆盖槽位与低频自由编辑项，每个槽位恰好出现一次。槽位 label 使用最小充分名称，如“主体”“画面主体”“底部文字”“背景”，避免被当前默认值限定。媒介、画风、质感、光线和固定空间机制进入 visualContract。
 - 完成逐元素路由对账：`componentGraph` 中每个可见元素都明确进入槽位、Prompt 自由编辑、visualContract 固定实现或清理四类路由之一。没有进入槽位的颜色、形状、图案、装饰、容器内容和次要文字，只要允许用户改动，就以当前默认外观进入 Prompt 并建立 `editableFactRouting`。
-- `editableCandidates` 必须对 `componentGraph` 的每个可见组件作出“选中或排除”决议。每个正式槽位在 `slotEvidence` 声明 `controlScope`、`controlledComponentIds` 和值完整性证据；内容槽位控制完整视觉对象或协调组，槽位值不能只留颜色、材质、边缘等修饰词。
-- 为每项可编辑事实建立 `editableFactRouting`，明确它属于 Prompt 或某个槽位，列出 visualContract 中禁止残留的旧值及同义表达，并将包装顶部食物这类联动部件全部纳入 binding 依赖目标。
+- `editableCandidates` 必须对 `componentGraph` 的每个可见组件作出“选中或排除”决议。每个正式槽位在 `slotEvidence` 声明 `controlScope`、`controlledComponentIds` 和值完整性证据。对象替换控制完整视觉对象或协调组；整体配色、材质或图案确有独立高价值、且载体由模板机制固定时，使用有载体证据的 `visual_attribute`。
+- 为每项可编辑事实建立 `editableFactRouting`，明确它属于 Prompt 或某个槽位；槽位默认值、三个推荐项、当前旧值及同义表达全部列入 visualContract 禁写词，并将包装顶部食物这类联动部件全部纳入 binding 依赖目标。
 - 标题、描述和标签共同表达模板价值与使用动机，避免组件清单和编译术语。
 
 文字长度与语义路由、已识别身份命名、图片输入配置、身份特征权限及标签数量，逐项执行字段规范。完成时，每个开放内容有编辑路径，每个槽位有对应 binding，固定约束有模板机制依据。

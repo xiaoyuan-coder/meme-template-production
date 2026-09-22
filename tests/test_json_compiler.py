@@ -163,6 +163,14 @@ class TemplateTagAssemblyTests(unittest.TestCase):
         with self.assertRaisesRegex(compiler.ContractError, "low-value presentation"):
             compiler.validate_formal_json(formal)
 
+    def test_color_only_background_border_and_palette_tags_are_rejected(self):
+        for low_value_tag in ("蓝色背景", "绿色描边", "黄红配色"):
+            with self.subTest(tag=low_value_tag):
+                tagging = self.tagging()
+                tagging["keywords"][-1] = low_value_tag
+                with self.assertRaisesRegex(compiler.ContractError, "low-value presentation"):
+                    compiler.merge_template_discovery_tags(tagging)
+
 
 class GalleryAndCompilationTests(unittest.TestCase):
     def test_authoring_tags_are_bound_to_the_image_tagging_profile(self):
@@ -218,6 +226,105 @@ class GalleryAndCompilationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(compiler.ContractError, "complete visual object"):
             compiler.validate_authoring_contract(analysis, draft, envelope)
+
+    def test_visual_attribute_slot_accepts_complete_palette_values(self):
+        envelope = valid_image_envelope()
+        draft = valid_formal_draft()
+        analysis = valid_approved_analysis(envelope["image"]["sha256"])
+        palette_values = ["粉白闪光", "冷蓝银光", "暖橙金光", "黑白高对比"]
+        palette_slot = draft["inputSchema"]["slots"][1]
+        palette_slot["id"] = "palette"
+        palette_slot["label"] = "整体配色"
+        palette_slot["text"]["defaultValue"] = palette_values[0]
+        palette_slot["text"]["suggestions"] = palette_values[1:]
+        draft["promptTemplate"] = (
+            '画面中央是{{ subject | "橘白猫" }}，整体采用'
+            '{{ palette | "粉白闪光" }}。'
+        )
+        draft["runtimeSemantics"]["inputBindings"]["palette"] = (
+            draft["runtimeSemantics"]["inputBindings"].pop("background")
+        )
+
+        analysis["playDecisionModel"]["coreUserDecisions"][1]["slotId"] = "palette"
+        analysis["editableCandidates"][1]["slotId"] = "palette"
+        analysis["slotCoverageReview"]["selectedSlotIds"][1] = "palette"
+        analysis["slotCoverageReview"]["axes"]["scene"]["selectedSlotIds"] = []
+        analysis["slotCoverageReview"]["axes"]["color"]["selectedSlotIds"] = ["palette"]
+        evidence = analysis["slotEvidence"].pop("background")
+        evidence.update({
+            "decisionId": "choose_background",
+            "defaultValue": palette_values[0],
+            "semanticAxis": "整张画面的协调配色",
+            "granularity": "整体视觉属性",
+            "controlScope": "visual_attribute",
+            "attributeScopeEvidence": "配色作用于整张贴纸；贴纸载体、构图和主体关系保持固定",
+            "openVisualFacts": palette_values,
+            "suggestionChecks": [
+                {"value": value, "sameAxis": True, "sameGranularity": True,
+                 "mechanismCompatible": True}
+                for value in palette_values[1:]
+            ],
+            "valueCompletenessChecks": [
+                {"value": value, "completeAttribute": True,
+                 "evidence": "该值表达可独立选择的整套配色"}
+                for value in palette_values
+            ],
+        })
+        analysis["slotEvidence"]["palette"] = evidence
+        analysis["promptCoverage"]["slotIds"][1] = "palette"
+        analysis["promptCoverage"]["visualElementRoutes"][1]["slotId"] = "palette"
+        fact = analysis["editableFactRouting"][1]
+        fact.update({
+            "factId": "overall_palette",
+            "axis": "color",
+            "slotId": "palette",
+            "promptTerms": [palette_values[0]],
+            "forbiddenRuntimeTerms": palette_values,
+            "evidence": "整体配色由 palette 槽位控制",
+        })
+        analysis["promptCoverage"]["editableFactIds"][1] = "overall_palette"
+        analysis["promptCoverage"]["visualElementRoutes"][1]["factIds"] = ["overall_palette"]
+        analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
+        analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(draft["runtimeSemantics"])
+        analysis["semanticModel"]["dynamicFactSources"].pop("background")
+        analysis["semanticModel"]["dynamicFactSources"]["palette"] = "inputSchema.slots.palette"
+        analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
+
+        compiler.validate_authoring_contract(analysis, draft, envelope)
+
+    def test_visual_attribute_scope_requires_attribute_axis_and_fixed_carrier_evidence(self):
+        envelope = valid_image_envelope()
+        draft = valid_formal_draft()
+        analysis = valid_approved_analysis(envelope["image"]["sha256"])
+        evidence = analysis["slotEvidence"]["background"]
+        evidence["controlScope"] = "visual_attribute"
+        evidence["valueCompletenessChecks"] = [
+            {"value": value, "completeAttribute": True, "evidence": "完整属性值"}
+            for value in (
+                "米白纯色背景", "浅灰纯色背景", "暖黄渐变背景", "蓝色纸纹背景",
+            )
+        ]
+        analysis["editableFactRouting"][1]["axis"] = "background"
+        with self.assertRaisesRegex(compiler.ContractError, "visual attribute"):
+            compiler.validate_authoring_contract(analysis, draft, envelope)
+
+    def test_every_slot_value_must_be_excluded_from_visual_contract(self):
+        envelope = valid_image_envelope()
+        draft = valid_formal_draft()
+        analysis = valid_approved_analysis(envelope["image"]["sha256"])
+        analysis["editableFactRouting"][1]["forbiddenRuntimeTerms"] = ["米白纯色背景"]
+        with self.assertRaisesRegex(compiler.ContractError, "default and suggestion values"):
+            compiler.validate_authoring_contract(analysis, draft, envelope)
+
+        locked = valid_formal_draft()
+        locked["runtimeSemantics"]["visualContract"]["colorAndLight"].append("保持暖黄渐变背景")
+        locked_analysis = valid_approved_analysis(envelope["image"]["sha256"])
+        locked_analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(
+            locked["runtimeSemantics"]
+        )
+        locked_analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(locked)
+        with self.assertRaisesRegex(compiler.ContractError, "locks back"):
+            compiler.validate_authoring_contract(locked_analysis, locked, envelope)
 
     def test_compile_final_json_reuses_upstream_immutable_url(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
@@ -411,7 +518,9 @@ class GalleryAndCompilationTests(unittest.TestCase):
         ]
         evidence["openVisualFacts"] = ["葛城美里", "式波·明日香", "绫波丽", "五条悟"]
         analysis["editableFactRouting"][0]["promptTerms"] = ["葛城美里"]
-        analysis["editableFactRouting"][0]["forbiddenRuntimeTerms"] = ["葛城美里"]
+        analysis["editableFactRouting"][0]["forbiddenRuntimeTerms"] = [
+            "葛城美里", "式波·明日香", "绫波丽", "五条悟",
+        ]
         analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
         analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
         compiler.validate_authoring_contract(analysis, draft, envelope)
@@ -427,7 +536,9 @@ class GalleryAndCompilationTests(unittest.TestCase):
         generic["slotEvidence"]["subject"]["identityRecognition"]["canonicalName"] = "紫发红夹克角色"
         generic["slotEvidence"]["subject"]["openVisualFacts"][0] = "紫发红夹克角色"
         generic["editableFactRouting"][0]["promptTerms"] = ["紫发红夹克角色"]
-        generic["editableFactRouting"][0]["forbiddenRuntimeTerms"] = ["紫发红夹克角色"]
+        generic["editableFactRouting"][0]["forbiddenRuntimeTerms"] = [
+            "紫发红夹克角色", "式波·明日香", "绫波丽", "五条悟",
+        ]
         generic["semanticModel"]["promptTemplate"] = generic_draft["promptTemplate"]
         generic["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(generic_draft)
         with self.assertRaises(compiler.ContractError):
@@ -940,7 +1051,9 @@ class GalleryAndCompilationTests(unittest.TestCase):
             "家庭成员", "亲友团", "同事团队", "同学聚会",
         ]
         analysis["editableFactRouting"][0]["promptTerms"] = ["家庭成员"]
-        analysis["editableFactRouting"][0]["forbiddenRuntimeTerms"] = ["家庭成员"]
+        analysis["editableFactRouting"][0]["forbiddenRuntimeTerms"] = [
+            "家庭成员", "亲友团", "同事团队", "同学聚会",
+        ]
         analysis["editableFactRouting"][0]["requiredTargetIds"] = ["subject_group"]
         analysis["slotEvidence"]["subject"].pop("identityRecognition")
         analysis["slotEvidence"]["subject"]["groupDecision"] = {

@@ -418,7 +418,10 @@
           "橘白猫"
         ],
         "forbiddenRuntimeTerms": [
-          "橘白猫"
+          "橘白猫",
+          "三花猫",
+          "银渐层猫",
+          "黑白奶牛猫"
         ],
         "requiredTargetIds": [
           "subject_main"

@@ -504,7 +504,7 @@ def valid_approved_analysis(image_sha: str) -> dict:
             "owner": "slot",
             "slotId": "subject",
             "promptTerms": ["橘白猫"],
-            "forbiddenRuntimeTerms": ["橘白猫"],
+            "forbiddenRuntimeTerms": ["橘白猫", "三花猫", "银渐层猫", "黑白奶牛猫"],
             "requiredTargetIds": ["subject_main"],
             "evidence": "主体身份在 Prompt Template 中由 subject 槽位编辑",
         }, {
@@ -513,7 +513,9 @@ def valid_approved_analysis(image_sha: str) -> dict:
             "owner": "slot",
             "slotId": "background",
             "promptTerms": ["米白纯色背景"],
-            "forbiddenRuntimeTerms": ["米白纯色背景"],
+            "forbiddenRuntimeTerms": [
+                "米白纯色背景", "浅灰纯色背景", "暖黄渐变背景", "蓝色纸纹背景",
+            ],
             "requiredTargetIds": ["background_canvas"],
             "evidence": "背景外观在 Prompt Template 中由 background 槽位编辑",
         }],

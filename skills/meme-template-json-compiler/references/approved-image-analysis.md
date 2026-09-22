@@ -48,7 +48,7 @@
 
 每个 `editableCandidate` 都记录 `selected`、`selectionReason` 和 `exclusionReason`。选中理由只能是 `identity_control/template_hook/high_value_text/exact_content_asset`。普通餐食、背景小物和陪衬装饰不能仅因“肉眼可见”就成为槽位。
 
-每个正式槽位在 `slotEvidence` 中保存：六门禁结果、对应 `decisionId`、默认值、语义轴、颗粒度、输入模式决议、推荐项替换检查、binding 决议和 `openVisualFacts`。同时声明 `controlScope=identity|semantic_text|complete_visual_object|coordinated_group`、`controlledComponentIds` 和 `valueCompletenessChecks`。完整对象与协调组的默认值、三个推荐值必须逐项包含完整对象名词；协调组的 binding 覆盖全部依赖 target。每个文字槽还保存 `defaultLanguageReview`；身份槽保存 `identityRecognition`，明确当前图是否已识别出具体身份及其通行姓名。能够从服装、发型、标志、画面文字或其他稳定特征确认具体 IP、真人或历史人物时，必须标记为 `recognized`，正式默认值等于具体通行姓名；不得改写为发色、服装、性别等外观描述来规避专名。证据不足时标记为 `unrecognized`，使用简洁的可见身份描述。`openVisualFacts` 是该槽开放后不得被 title、tag 或 visualContract 锁回的身份、文字、服装、颜色或内容事实。
+每个正式槽位在 `slotEvidence` 中保存：六门禁结果、对应 `decisionId`、默认值、语义轴、颗粒度、输入模式决议、推荐项替换检查、binding 决议和 `openVisualFacts`。同时声明 `controlScope=identity|semantic_text|complete_visual_object|coordinated_group|visual_attribute`、`controlledComponentIds` 和 `valueCompletenessChecks`。完整对象与协调组的默认值、三个推荐值必须逐项包含完整对象名词；协调组的 binding 覆盖全部依赖 target。`visual_attribute` 仅用于文字输入的高价值整体配色、材质或图案，逐值证明它是一套完整可选属性，并用 `attributeScopeEvidence` 说明固定载体及作用范围；对象身份或形状也应变化时回到完整对象槽位。每个文字槽还保存 `defaultLanguageReview`；身份槽保存 `identityRecognition`，明确当前图是否已识别出具体身份及其通行姓名。能够从服装、发型、标志、画面文字或其他稳定特征确认具体 IP、真人或历史人物时，必须标记为 `recognized`，正式默认值等于具体通行姓名；不得改写为发色、服装、性别等外观描述来规避专名。证据不足时标记为 `unrecognized`，使用简洁的可见身份描述。`openVisualFacts` 是该槽开放后不得被 title、tag 或 visualContract 锁回的身份、文字、服装、颜色或内容事实。
 
 `titleEvidence` 同时证明图像根据、使用动机、口语自然、槽位可迁移、用户吸引力和发现价值。`descriptionEvidence` 证明描述面向用户、补充标题、口语自然且不锁定开放值。每个 `tagEvidence` 项除了图像根据和类别，还要写明 `searchIntent`，表示它承接的真实用户查询。
 

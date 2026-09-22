@@ -102,7 +102,14 @@ def sha256_json(value: Any) -> str:
 
 def _validate_no_excluded_presentation_tags(tags: Sequence[str], authoring: Mapping[str, Any]) -> None:
     excluded = set(authoring["tagAssembly"]["excludedPresentationTags"])
-    rejected = sorted(set(tags).intersection(excluded))
+    patterns = [
+        re.compile(pattern)
+        for pattern in authoring["tagAssembly"].get("excludedPresentationTagPatterns", [])
+    ]
+    rejected = sorted({
+        tag for tag in tags
+        if tag in excluded or any(pattern.fullmatch(tag) for pattern in patterns)
+    })
     if rejected:
         raise ContractError(f"tags contain low-value presentation labels: {rejected}")
 
@@ -742,6 +749,21 @@ def _validate_editable_fact_routing(
     slot_ids = {slot["id"] for slot in formal_draft["inputSchema"]["slots"]}
     if slot_owners != slot_ids:
         raise ContractError("every slot must own at least one editable fact")
+    slots_by_id = {
+        slot["id"]: slot for slot in formal_draft["inputSchema"]["slots"]
+    }
+    for fact in facts:
+        if fact["owner"] != "slot":
+            continue
+        slot = slots_by_id[fact["slotId"]]
+        slot_values = {
+            slot["text"]["defaultValue"],
+            *slot["text"]["suggestions"],
+        }
+        if not slot_values.issubset(set(fact["forbiddenRuntimeTerms"])):
+            raise ContractError(
+                "slot-owned editable facts must exclude all default and suggestion values from visualContract"
+            )
     covered_fact_ids = analysis["promptCoverage"].get("editableFactIds")
     if not isinstance(covered_fact_ids, list) or set(covered_fact_ids) != set(fact_ids):
         raise ContractError("promptTemplate coverage must name every editable fact")
@@ -1182,8 +1204,10 @@ def _validate_slot_control_evidence(
     if evidence.get("selectionReason") == "high_value_text" and scope != "semantic_text":
         raise ContractError("high-value text requires semantic-text control scope")
     if binding.get("operation") == "replace_content" and evidence.get("selectionReason") != "high_value_text":
-        if scope not in {"complete_visual_object", "coordinated_group"}:
-            raise ContractError("content slots require a complete visual object or coordinated group")
+        if scope not in {"complete_visual_object", "coordinated_group", "visual_attribute"}:
+            raise ContractError(
+                "content slots require a complete visual object, coordinated group, or visual attribute"
+            )
     if (
         scope == "coordinated_group"
         and len(controlled) < 2
@@ -1207,8 +1231,39 @@ def _validate_slot_control_evidence(
             _non_empty_text(check.get("evidence"), "complete visual object evidence")
             if check.get("completeObject") is not True or object_term not in check["value"]:
                 raise ContractError("complete visual object values must include an explicit object term")
+    elif scope == "visual_attribute":
+        owned_facts = [
+            fact for fact in analysis["editableFactRouting"]
+            if isinstance(fact, Mapping)
+            and fact.get("owner") == "slot"
+            and fact.get("slotId") == slot["id"]
+        ]
+        allowed_attribute_axes = set(_contract()["authoring"]["visualAttributeAxes"])
+        if (
+            not owned_facts
+            or any(fact.get("axis") not in allowed_attribute_axes for fact in owned_facts)
+            or evidence.get("selectionReason") != "template_hook"
+            or slot.get("image") is not None
+        ):
+            raise ContractError(
+                "visual attribute slots require a text-only template-hook on color, material, or pattern"
+            )
+        _non_empty_text(
+            evidence.get("attributeScopeEvidence"),
+            "visual attribute fixed-carrier evidence",
+        )
+        if [check.get("value") for check in completeness if isinstance(check, Mapping)] != values:
+            raise ContractError("visual attribute checks must follow default and suggestion order")
+        for check in completeness:
+            if not isinstance(check, Mapping) or set(check) != {
+                "value", "completeAttribute", "evidence"
+            }:
+                raise ContractError("visual attribute check fields are invalid")
+            _non_empty_text(check.get("evidence"), "visual attribute evidence")
+            if check.get("completeAttribute") is not True:
+                raise ContractError("visual attribute values must express a complete selectable attribute")
     elif completeness:
-        raise ContractError("identity and semantic-text slots use no object completeness checks")
+        raise ContractError("identity and semantic-text slots use no completeness checks")
 
     component_coverage = analysis["semanticModel"]["componentCoverage"]
     required_targets = {

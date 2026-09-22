@@ -83,6 +83,11 @@
       "excludedPresentationTags": [
         "白底摄影", "白底图标", "纯白背景", "居中构图",
         "高清图片", "干净背景", "柔和光线", "清晰细节"
+      ],
+      "excludedPresentationTagPatterns": [
+        "^(?:纯白|白色|黑色|蓝色|绿色|红色|黄色|粉色|紫色|灰色|米白|浅蓝|浅灰|暖黄).{0,4}背景$",
+        "^.{1,6}描边$",
+        "^(?:黑白|黄红|蓝黄|粉白|红蓝|红黄|蓝白|绿白|紫粉).{0,2}配色$"
       ]
     },
     "expectedEvidenceFields": [
@@ -138,8 +143,9 @@
       "identity_control", "template_hook", "high_value_text", "exact_content_asset"
     ],
     "slotControlScopes": [
-      "identity", "semantic_text", "complete_visual_object", "coordinated_group"
+      "identity", "semantic_text", "complete_visual_object", "coordinated_group", "visual_attribute"
     ],
+    "visualAttributeAxes": ["color", "material", "pattern"],
     "identityRecognitionStatuses": ["recognized", "unrecognized"],
     "recognizedIdentityGenericSuffixes": ["角色", "人物", "主体"],
     "featureAuthorityAxes": [

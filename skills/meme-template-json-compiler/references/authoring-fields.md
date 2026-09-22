@@ -48,6 +48,8 @@ description 使用 1–20 个中文字符，用面向用户的自然语言补充
 
 多个可见元素在下列条件同时成立时合并为一个组合槽位：共同承担一种功能，用户会用一个短语整组替换，各实例无独立身份或不同文字语义，后端能将一份输入分发到所有目标。例如围绕主体的小花、草莓和星星可合并为“周围装饰”，并在 binding 中列全所有装饰目标。独立文字、可寻址身份或需要不同输入的对象继续拆分。
 
+整体配色、材质或图案本身承担模板钩子时，可以使用 `visual_attribute`。该控制只适用于文字输入，并满足三项条件：用户选择的是一套完整属性值；属性作用到明确的组件与全部依赖目标；载体的对象身份和形状由模板机制固定且有 `attributeScopeEvidence`。例如固定梦幻贴纸构图中的“粉白闪光”可以作为整体配色；爱心颜色与爱心形状都影响用户版本时，应开放“蓝色粗边爱心”这一完整外框对象。
+
 ### 槽位名称
 
 `inputSchema.slots[].label` 直接出现在用户界面，必须在用户看不到 Prompt Template 时仍可独立理解。使用最小充分名称：“宠物”适用于只允许宠物的输入；可以上传人物、宠物或其他内容时，使用“主体”或“画面主体”。
@@ -134,7 +136,7 @@ Prompt Template 是用户可以整段修改的内容层。用自然语言描述�
 
 ### editableFactRouting：属性唯一归属
 
-每个 Prompt 可编辑事实建立一条路由：`owner=slot` 时写明 `slotId` 及所有联动 `requiredTargetIds`；低频自由编辑项使用 `owner=prompt`。`promptTerms` 保存 Prompt 中可核对的当前值，`forbiddenRuntimeTerms` 至少包含这些当前值，并补充 visualContract 中可能锁回旧外观的同义语、颜色、形状或旧内容表达。
+每个 Prompt 可编辑事实建立一条路由：`owner=slot` 时写明 `slotId` 及所有联动 `requiredTargetIds`；低频自由编辑项使用 `owner=prompt`。`promptTerms` 保存 Prompt 中可核对的当前值。槽位事实的 `forbiddenRuntimeTerms` 包含默认值、三个推荐项，并补充 visualContract 中可能锁回旧外观的同义语、颜色、形状或旧内容表达；Prompt 事实至少包含当前可编辑值及其同义表达。
 
 同一视觉属性只有一个权限层：Prompt/slot 拥有的内容不进入 visualContract；Runtime 保存目标和依赖映射；visualContract 保存用户不需要修改的模板实现。例如“包装内容”替换为薯片时，包装袋和顶部露出的食物都属于同一依赖闭包，必须同时绑定。
 
