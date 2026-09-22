@@ -12,7 +12,7 @@
     }
   },
   "analysis": {
-    "schemaVersion": 6,
+    "schemaVersion": 7,
     "approvedImageSha256": "9d06e4abfc74edc08e4b4443ce6ecd0c21c21c7af1629bb0ab59084fbdd71008",
     "visualMechanism": "中央主体紧抱宠物的温暖手绘场景",
     "templateValue": {
@@ -211,10 +211,36 @@
       "slotPortability": true,
       "evidence": "描述用日常语言补充模板用法，且不锁定开放值"
     },
+    "taggingProfile": {
+      "matchProfile": {
+        "subjects": [
+          {
+            "subjectKey": "pet.cat",
+            "memberCount": 1
+          }
+        ],
+        "sourceImageType": "single_identity"
+      },
+      "hiddenTags": [
+        "动物"
+      ],
+      "keywords": [
+        "猫",
+        "拥抱",
+        "手绘",
+        "温暖",
+        "互动"
+      ]
+    },
     "tagEvidence": {
       "动物": {
         "visualEvidence": "图中可见动物特征",
         "searchIntent": "用户搜索动物相关模板",
+        "category": "subject"
+      },
+      "猫": {
+        "visualEvidence": "图中中央主体是猫",
+        "searchIntent": "用户搜索猫模板",
         "category": "subject"
       },
       "拥抱": {
@@ -296,6 +322,11 @@
           "黑白奶牛猫"
         ],
         "bindingKind": "one_to_one",
+        "controlScope": "identity",
+        "controlledComponentIds": [
+          "subject_main"
+        ],
+        "valueCompletenessChecks": [],
         "inheritFromUpload": [
           "可辨认身份特征",
           "服装",
@@ -466,7 +497,7 @@
     },
     "selfReview": {
       "status": "PASS",
-      "reviewedDraftSha256": "32c2f2f214ba5d096fcf2491eb0d6f315e37b456611ff7ae7c0c02b9f27abdf7",
+      "reviewedDraftSha256": "7f7427015ebbdc5e768583f5f06cdc9ecef14eae38626e071e7640509804e78f",
       "checks": {
         "templateValueFocused": {
           "passed": true,
@@ -678,6 +709,7 @@
     "metadata": {
       "tags": [
         "动物",
+        "猫",
         "拥抱",
         "手绘",
         "温暖",

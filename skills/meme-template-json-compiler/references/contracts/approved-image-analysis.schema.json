@@ -1,17 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://contracts.memebuy.cn/approved-image-analysis-v6.schema.json",
+  "$id": "https://contracts.memebuy.cn/approved-image-analysis-v7.schema.json",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schemaVersion", "approvedImageSha256", "visualMechanism", "templateValue", "playDecisionModel", "componentGraph",
     "identityTopology", "textRegions", "mediumComposition", "spatialRelations",
     "containers", "fixedStructure", "editableCandidates", "editableFactRouting", "slotCoverageReview", "counts", "fieldEvidence",
-    "titleEvidence", "descriptionEvidence", "tagEvidence", "slotEvidence", "promptCoverage",
+    "titleEvidence", "descriptionEvidence", "taggingProfile", "tagEvidence", "slotEvidence", "promptCoverage",
     "translationEquivalences", "semanticModel", "selfReview", "warnings"
   ],
   "properties": {
-    "schemaVersion": {"const": 6},
+    "schemaVersion": {"const": 7},
     "approvedImageSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "visualMechanism": {"type": "string", "minLength": 1},
     "templateValue": {
@@ -129,6 +129,40 @@
     "fieldEvidence": {"type": "object"},
     "titleEvidence": {"type": "object"},
     "descriptionEvidence": {"type": "object"},
+    "taggingProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matchProfile", "keywords", "hiddenTags"],
+      "properties": {
+        "matchProfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["subjects", "sourceImageType"],
+          "properties": {
+            "subjects": {
+              "type": "array", "minItems": 1, "maxItems": 1,
+              "items": {
+                "type": "object", "additionalProperties": false,
+                "required": ["subjectKey", "memberCount"],
+                "properties": {
+                  "subjectKey": {"enum": ["person", "pet.cat", "pet.dog", "pet.rabbit", "pet.bird", "pet.hamster", "pet.other", "food", "object", "scenery", "text_image", "other"]},
+                  "memberCount": {"type": "integer", "minimum": 0}
+                }
+              }
+            },
+            "sourceImageType": {"enum": ["non_identity", "single_identity", "group_identity", "multi_identity_composite"]}
+          }
+        },
+        "keywords": {
+          "type": "array", "minItems": 4, "maxItems": 6, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 12}
+        },
+        "hiddenTags": {
+          "type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true,
+          "items": {"enum": ["人物", "动物", "二次元", "粉丝应援", "情侣", "亲子家庭", "美食", "风景建筑", "搞怪meme", "文字设计", "创意艺术"]}
+        }
+      }
+    },
     "tagEvidence": {"type": "object"},
     "slotEvidence": {"type": "object"},
     "promptCoverage": {

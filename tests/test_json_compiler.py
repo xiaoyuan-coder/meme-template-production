@@ -165,6 +165,60 @@ class TemplateTagAssemblyTests(unittest.TestCase):
 
 
 class GalleryAndCompilationTests(unittest.TestCase):
+    def test_authoring_tags_are_bound_to_the_image_tagging_profile(self):
+        envelope = valid_image_envelope()
+        image_sha = envelope["image"]["sha256"]
+        draft = valid_formal_draft()
+        analysis = valid_approved_analysis(image_sha)
+        analysis["taggingProfile"] = {
+            "matchProfile": {
+                "subjects": [{"subjectKey": "pet.other", "memberCount": 1}],
+                "sourceImageType": "single_identity",
+            },
+            "hiddenTags": ["动物"],
+            "keywords": ["拥抱", "手绘", "温暖", "互动"],
+        }
+
+        compiler.validate_authoring_contract(analysis, draft, envelope)
+
+        drifted = copy.deepcopy(draft)
+        drifted["metadata"]["tags"][-1] = "宠物拼贴"
+        drifted_analysis = copy.deepcopy(analysis)
+        drifted_analysis["tagEvidence"].pop("互动")
+        drifted_analysis["tagEvidence"]["宠物拼贴"] = {
+            "visualEvidence": "画面中可见宠物拼贴",
+            "searchIntent": "用户搜索宠物拼贴模板",
+            "category": "medium",
+        }
+        drifted_analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(drifted)
+        with self.assertRaisesRegex(compiler.ContractError, "tagging profile"):
+            compiler.validate_authoring_contract(drifted_analysis, drifted, envelope)
+
+    def test_complete_visual_object_slot_rejects_modifier_only_values(self):
+        envelope = valid_image_envelope()
+        draft = valid_formal_draft()
+        analysis = valid_approved_analysis(envelope["image"]["sha256"])
+        analysis["slotEvidence"]["background"].update({
+            "controlScope": "complete_visual_object",
+            "controlledComponentIds": ["background_canvas"],
+            "valueCompletenessChecks": [{
+                "value": value,
+                "completeObject": value != "米白纯色背景",
+                "objectTerm": "背景",
+                "evidence": "值中包含完整背景对象",
+            } for value in (
+                "米白纯色背景", "浅灰纯色背景", "暖黄渐变背景", "蓝色纸纹背景",
+            )],
+        })
+        analysis["slotEvidence"]["subject"].update({
+            "controlScope": "identity",
+            "controlledComponentIds": ["subject_main"],
+            "valueCompletenessChecks": [],
+        })
+
+        with self.assertRaisesRegex(compiler.ContractError, "complete visual object"):
+            compiler.validate_authoring_contract(analysis, draft, envelope)
+
     def test_compile_final_json_reuses_upstream_immutable_url(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
@@ -308,9 +362,16 @@ class GalleryAndCompilationTests(unittest.TestCase):
                       "width": 1024, "height": 1024, "mime": "image/png"},
         }
         draft = valid_formal_draft()
-        draft["metadata"]["tags"][-1] = "橘白猫"
+        draft["metadata"]["tags"] = ["动物", "猫", "拥抱", "手绘", "温暖", "橘白猫"]
         analysis = valid_approved_analysis(image_sha)
+        analysis["taggingProfile"]["matchProfile"]["subjects"][0]["subjectKey"] = "pet.cat"
+        analysis["taggingProfile"]["keywords"] = ["猫", "拥抱", "手绘", "温暖", "橘白猫"]
         analysis["tagEvidence"].pop("互动")
+        analysis["tagEvidence"]["猫"] = {
+            "visualEvidence": "当前模板封面中央可见猫",
+            "searchIntent": "用户搜索猫模板",
+            "category": "subject",
+        }
         analysis["tagEvidence"]["橘白猫"] = {
             "visualEvidence": "当前模板封面中央可见橘白猫",
             "searchIntent": "用户搜索橘白猫模板",
@@ -608,6 +669,31 @@ class GalleryAndCompilationTests(unittest.TestCase):
         ):
             compiler.validate_authoring_contract(unowned_fact, draft, envelope)
 
+    def test_every_visible_component_requires_an_editability_decision(self):
+        envelope = valid_image_envelope()
+        draft = valid_formal_draft()
+        analysis = valid_approved_analysis(envelope["image"]["sha256"])
+        analysis["componentGraph"].append({
+            "componentId": "decorations_group",
+            "role": "coordinated_decorations",
+            "region": "around_subject",
+        })
+        analysis["semanticModel"]["componentCoverage"]["decorations_group"] = {
+            "targetIds": ["background_canvas"],
+            "visualContractFields": ["styleTraits"],
+        }
+        analysis["promptCoverage"]["visualElementRoutes"].append({
+            "componentId": "decorations_group",
+            "route": "visual_contract",
+            "contractFields": ["styleTraits"],
+            "evidence": "小装饰围绕主体分布",
+        })
+
+        with self.assertRaisesRegex(
+            compiler.ContractError, "classify every visible component"
+        ):
+            compiler.validate_authoring_contract(analysis, draft, envelope)
+
     def test_text_slot_routing_and_self_review_sha_cannot_be_stale(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
@@ -741,6 +827,9 @@ class GalleryAndCompilationTests(unittest.TestCase):
                 ],
                 "openVisualFacts": [default, *suggestions],
                 "bindingKind": "replace_content",
+                "controlScope": "semantic_text",
+                "controlledComponentIds": [target_id],
+                "valueCompletenessChecks": [],
                 "visualEvidence": f"{label}通过箭头建立人物关系叙事",
             }
             analysis["semanticModel"]["componentCoverage"][target_id] = {
@@ -836,6 +925,7 @@ class GalleryAndCompilationTests(unittest.TestCase):
         }
         analysis["semanticModel"]["completeRedrawByTarget"] = {"subject_group": True}
         analysis["slotEvidence"]["subject"]["bindingKind"] = "preserve_group"
+        analysis["slotEvidence"]["subject"]["controlledComponentIds"] = ["subject_group"]
         analysis["slotEvidence"]["subject"]["defaultValue"] = "家庭成员"
         analysis["slotEvidence"]["subject"]["inputModeDecision"] = {
             "modes": ["text", "image"], "reason": "dynamic_group",

@@ -521,6 +521,175 @@ def evaluate_editability_case(case: Mapping[str, Any]) -> dict[str, Any]:
     return {"caseId": case_id, "passed": not findings, "findings": findings}
 
 
+def evaluate_template_regression_suite(
+    templates: Sequence[Mapping[str, Any]], suite: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Evaluate immutable template outputs against an explicit regression contract."""
+
+    if not isinstance(suite, Mapping) or set(suite) != {"suiteId", "cases"}:
+        raise ContractError("regression suite requires only suiteId and cases")
+    suite_id = _non_empty_text(suite.get("suiteId"), "regression suiteId")
+    cases = suite.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise ContractError("regression suite requires at least one case")
+    if not isinstance(templates, Sequence) or isinstance(templates, (str, bytes, bytearray)):
+        raise ContractError("regression templates must be a sequence")
+    requested_template_keys = {
+        case.get("templateKey")
+        for case in cases
+        if isinstance(case, Mapping) and isinstance(case.get("templateKey"), str)
+    }
+    by_key: dict[str, Mapping[str, Any]] = {}
+    for template in templates:
+        if not isinstance(template, Mapping):
+            raise ContractError("regression templates must be objects")
+        key = _non_empty_text(template.get("key"), "regression template key")
+        if key in by_key:
+            if key in requested_template_keys:
+                raise ContractError("requested regression template keys must be unique")
+            continue
+        by_key[key] = template
+
+    findings: list[dict[str, Any]] = []
+    case_ids: set[str] = set()
+    template_keys: set[str] = set()
+    expected_case_fields = {
+        "caseId", "templateKey", "expectedSlotIds", "completeObjectSlots",
+        "editableFacts", "tagging",
+    }
+    for case in cases:
+        if not isinstance(case, Mapping) or set(case) != expected_case_fields:
+            raise ContractError("regression case fields are incomplete")
+        case_id = _non_empty_text(case.get("caseId"), "regression caseId")
+        template_key = _non_empty_text(case.get("templateKey"), "regression templateKey")
+        if case_id in case_ids or template_key in template_keys:
+            raise ContractError("regression cases and template keys must be unique")
+        case_ids.add(case_id)
+        template_keys.add(template_key)
+        template = by_key.get(template_key)
+        if template is None:
+            findings.append({
+                "code": "REGRESSION_TEMPLATE_MISSING",
+                "caseId": case_id,
+                "templateKey": template_key,
+                "path": "templates",
+            })
+            continue
+
+        expected_slot_ids = case.get("expectedSlotIds")
+        if (
+            not isinstance(expected_slot_ids, list)
+            or len(expected_slot_ids) != len(set(expected_slot_ids))
+            or any(not isinstance(slot_id, str) or not slot_id for slot_id in expected_slot_ids)
+        ):
+            raise ContractError("regression expectedSlotIds must be unique non-empty strings")
+        slots = template.get("inputSchema", {}).get("slots", [])
+        if not isinstance(slots, list) or any(not isinstance(slot, Mapping) for slot in slots):
+            raise ContractError("regression template slots must be objects")
+        actual_slot_ids = [slot.get("id") for slot in slots]
+        if actual_slot_ids != expected_slot_ids:
+            findings.append({
+                "code": "REGRESSION_SLOT_SET_MISMATCH",
+                "caseId": case_id,
+                "templateKey": template_key,
+                "path": "inputSchema.slots",
+                "expected": expected_slot_ids,
+                "actual": actual_slot_ids,
+            })
+        slots_by_id = {
+            slot.get("id"): slot for slot in slots
+            if isinstance(slot.get("id"), str) and slot.get("id")
+        }
+
+        object_reviews = case.get("completeObjectSlots")
+        if not isinstance(object_reviews, list):
+            raise ContractError("regression completeObjectSlots must be an array")
+        reviewed_slot_ids: set[str] = set()
+        for review in object_reviews:
+            if not isinstance(review, Mapping) or set(review) != {"slotId", "objectTerms"}:
+                raise ContractError("complete-object regression fields are invalid")
+            slot_id = _non_empty_text(review.get("slotId"), "complete-object slotId")
+            terms = review.get("objectTerms")
+            if (
+                slot_id in reviewed_slot_ids
+                or not isinstance(terms, list)
+                or not terms
+                or len(terms) != len(set(terms))
+                or any(not isinstance(term, str) or not term for term in terms)
+            ):
+                raise ContractError("complete-object terms must be unique non-empty strings")
+            reviewed_slot_ids.add(slot_id)
+            slot = slots_by_id.get(slot_id)
+            text_mode = slot.get("text") if isinstance(slot, Mapping) else None
+            values = []
+            if isinstance(text_mode, Mapping):
+                values = [text_mode.get("defaultValue"), *text_mode.get("suggestions", [])]
+            incomplete_values = [
+                value for value in values
+                if not isinstance(value, str) or not any(term in value for term in terms)
+            ]
+            if not values or incomplete_values:
+                findings.append({
+                    "code": "REGRESSION_PARTIAL_VISUAL_OBJECT",
+                    "caseId": case_id,
+                    "templateKey": template_key,
+                    "path": f"inputSchema.slots.{slot_id}.text",
+                    "values": incomplete_values or values,
+                })
+
+        editable_facts = case.get("editableFacts")
+        if not isinstance(editable_facts, list):
+            raise ContractError("regression editableFacts must be an array")
+        if editable_facts:
+            runtime = template.get("runtimeSemantics")
+            if not isinstance(runtime, Mapping):
+                raise ContractError("regression template requires runtimeSemantics")
+            editability = evaluate_editability_case({
+                "caseId": case_id,
+                "promptTemplate": template.get("promptTemplate"),
+                "visualContract": runtime.get("visualContract"),
+                "inputBindings": runtime.get("inputBindings"),
+                "editableFacts": editable_facts,
+            })
+            for finding in editability["findings"]:
+                findings.append({
+                    **finding,
+                    "caseId": case_id,
+                    "templateKey": template_key,
+                })
+
+        tagging = case.get("tagging")
+        if tagging is not None:
+            try:
+                expected_tags = merge_template_discovery_tags(tagging)
+            except ContractError as exc:
+                findings.append({
+                    "code": "REGRESSION_TAGGING_INVALID",
+                    "caseId": case_id,
+                    "templateKey": template_key,
+                    "path": "tagging",
+                    "detail": str(exc),
+                })
+            else:
+                actual_tags = template.get("metadata", {}).get("tags")
+                if actual_tags != expected_tags:
+                    findings.append({
+                        "code": "REGRESSION_TAG_ASSEMBLY_MISMATCH",
+                        "caseId": case_id,
+                        "templateKey": template_key,
+                        "path": "metadata.tags",
+                        "expected": expected_tags,
+                        "actual": actual_tags,
+                    })
+
+    return {
+        "suiteId": suite_id,
+        "passed": not findings,
+        "caseCount": len(cases),
+        "findings": findings,
+    }
+
+
 def _validate_editable_fact_routing(
     analysis: Mapping[str, Any], formal_draft: Mapping[str, Any]
 ) -> None:
@@ -638,7 +807,7 @@ def validate_approved_image_analysis(
         "templateValue", "playDecisionModel",
         "identityTopology", "textRegions", "mediumComposition", "spatialRelations",
         "containers", "fixedStructure", "editableCandidates", "editableFactRouting", "slotCoverageReview", "counts", "fieldEvidence",
-        "titleEvidence", "descriptionEvidence", "tagEvidence", "slotEvidence", "promptCoverage",
+        "titleEvidence", "descriptionEvidence", "taggingProfile", "tagEvidence", "slotEvidence", "promptCoverage",
         "translationEquivalences", "semanticModel", "selfReview",
         "warnings",
     }
@@ -648,8 +817,8 @@ def validate_approved_image_analysis(
             f"approved image analysis fields mismatch; missing={sorted(required - analysis.keys())}, "
             f"extra={sorted(analysis.keys() - allowed)}"
         )
-    if analysis["schemaVersion"] != 6:
-        raise ContractError("approved image analysis schemaVersion must be 6")
+    if analysis["schemaVersion"] != 7:
+        raise ContractError("approved image analysis schemaVersion must be 7")
     if analysis["approvedImageSha256"] != approved_image["image"]["sha256"]:
         raise ContractError("approved image analysis belongs to another image")
     _non_empty_text(analysis["visualMechanism"], "visualMechanism")
@@ -729,6 +898,9 @@ def validate_approved_image_analysis(
     ):
         raise ContractError("description must pass every user-facing copy gate")
     _non_empty_text(description_evidence.get("evidence"), "descriptionEvidence.evidence")
+    assembled_tags = merge_template_discovery_tags(analysis["taggingProfile"])
+    if set(analysis["tagEvidence"]) != set(assembled_tags):
+        raise ContractError("tagEvidence must match the image tagging profile")
     _validate_text_regions(analysis["textRegions"])
     _validate_translation_equivalences(analysis["textRegions"], analysis["translationEquivalences"])
     _validate_semantic_model(analysis)
@@ -967,6 +1139,88 @@ def _validate_self_review(
             raise ContractError(f"self-review check {check_name} requires concrete evidence")
 
 
+def _validate_slot_control_evidence(
+    slot: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+    binding: Mapping[str, Any],
+    analysis: Mapping[str, Any],
+) -> None:
+    """Require each slot to own a complete object, semantic text, identity, or group."""
+
+    scope = evidence.get("controlScope")
+    allowed_scopes = set(_contract()["authoring"]["slotControlScopes"])
+    if scope not in allowed_scopes:
+        raise ContractError(f"slot {slot['id']} requires a valid control scope")
+    controlled = evidence.get("controlledComponentIds")
+    component_ids = {
+        component.get("componentId")
+        for component in analysis["componentGraph"]
+        if isinstance(component, Mapping)
+    }
+    if (
+        not isinstance(controlled, list)
+        or not controlled
+        or len(controlled) != len(set(controlled))
+        or not set(controlled).issubset(component_ids)
+    ):
+        raise ContractError(f"slot {slot['id']} controlled components must be unique and known")
+    slot_route_components = {
+        route.get("componentId")
+        for route in analysis["promptCoverage"]["visualElementRoutes"]
+        if isinstance(route, Mapping)
+        and route.get("route") == "slot"
+        and route.get("slotId") == slot["id"]
+    }
+    if set(controlled) != slot_route_components:
+        raise ContractError(
+            "visual element routes must cover componentGraph exactly once; "
+            f"slot {slot['id']} control scope differs from its routes"
+        )
+
+    if binding.get("operation") == "replace_identity" and scope != "identity":
+        raise ContractError("identity replacement requires identity control scope")
+    if evidence.get("selectionReason") == "high_value_text" and scope != "semantic_text":
+        raise ContractError("high-value text requires semantic-text control scope")
+    if binding.get("operation") == "replace_content" and evidence.get("selectionReason") != "high_value_text":
+        if scope not in {"complete_visual_object", "coordinated_group"}:
+            raise ContractError("content slots require a complete visual object or coordinated group")
+    if (
+        scope == "coordinated_group"
+        and len(controlled) < 2
+        and len(binding.get("targetIds", [])) < 2
+    ):
+        raise ContractError("coordinated-group slots require at least two visible components or targets")
+
+    completeness = evidence.get("valueCompletenessChecks")
+    if not isinstance(completeness, list):
+        raise ContractError(f"slot {slot['id']} requires value completeness checks")
+    values = [slot["text"]["defaultValue"], *slot["text"]["suggestions"]]
+    if scope in {"complete_visual_object", "coordinated_group"}:
+        if [check.get("value") for check in completeness if isinstance(check, Mapping)] != values:
+            raise ContractError("complete visual object checks must follow default and suggestion order")
+        for check in completeness:
+            if not isinstance(check, Mapping) or set(check) != {
+                "value", "completeObject", "objectTerm", "evidence"
+            }:
+                raise ContractError("complete visual object check fields are invalid")
+            object_term = _non_empty_text(check.get("objectTerm"), "complete visual object term")
+            _non_empty_text(check.get("evidence"), "complete visual object evidence")
+            if check.get("completeObject") is not True or object_term not in check["value"]:
+                raise ContractError("complete visual object values must include an explicit object term")
+    elif completeness:
+        raise ContractError("identity and semantic-text slots use no object completeness checks")
+
+    component_coverage = analysis["semanticModel"]["componentCoverage"]
+    required_targets = {
+        target_id
+        for component_id in controlled
+        for target_id in component_coverage.get(component_id, {}).get("targetIds", [])
+    }
+    bound_targets = set(binding.get("targetIds", []))
+    if not required_targets.issubset(bound_targets):
+        raise ContractError("slot control group leaves a dependent target unbound")
+
+
 def validate_authoring_contract(
     analysis: Mapping[str, Any], formal_draft: Mapping[str, Any], approved_image: Mapping[str, Any]
 ) -> None:
@@ -1006,6 +1260,8 @@ def validate_authoring_contract(
             raise ContractError("tag category is invalid")
     if not set(tags).intersection(authoring["majorTagValues"]):
         raise ContractError("tags require at least one exact official major category")
+    if tags != merge_template_discovery_tags(analysis["taggingProfile"]):
+        raise ContractError("metadata.tags must equal the merged image tagging profile")
     slots = formal_draft.get("inputSchema", {}).get("slots", [])
     if not isinstance(slots, list) or not slots:
         raise ContractError("inputSchema requires at least one slot")
@@ -1086,10 +1342,12 @@ def validate_authoring_contract(
     editable_slot_ids: list[str] = []
     component_ids = {component["componentId"] for component in analysis["componentGraph"]}
     candidate_component_ids: set[str] = set()
+    candidate_component_occurrences: list[str] = []
     for candidate in analysis["editableCandidates"]:
         if not isinstance(candidate, Mapping) or candidate.get("componentId") not in component_ids:
             raise ContractError("editableCandidates references an unknown component")
         candidate_component_ids.add(candidate["componentId"])
+        candidate_component_occurrences.append(candidate["componentId"])
         if candidate.get("selected") is True:
             if (
                 not isinstance(candidate.get("slotId"), str)
@@ -1103,8 +1361,14 @@ def validate_authoring_contract(
                 raise ContractError("excluded editable candidate requires an exclusion reason and no slot")
         else:
             raise ContractError("editable candidate must state whether it was selected")
-    if set(editable_slot_ids) != set(slot_ids) or len(editable_slot_ids) != len(set(editable_slot_ids)):
+    if set(editable_slot_ids) != set(slot_ids):
         raise ContractError("editableCandidates must account for every compiled slot")
+    if len(candidate_component_occurrences) != len(set(candidate_component_occurrences)):
+        raise ContractError("editableCandidates must classify each visible component exactly once")
+    if candidate_component_ids != component_ids:
+        raise ContractError(
+            "editableCandidates must classify every visible component as selected or excluded"
+        )
     _validate_slot_coverage_review(
         analysis["slotCoverageReview"], slot_ids, component_ids, candidate_component_ids
     )
@@ -1191,6 +1455,7 @@ def validate_authoring_contract(
         binding = bindings.get(slot["id"])
         if not isinstance(binding, Mapping):
             raise ContractError("every slot requires a runtime input binding")
+        _validate_slot_control_evidence(slot, evidence, binding, analysis)
         binding_kind = (
             binding.get("bindingPolicy")
             if binding.get("operation") == "replace_identity"

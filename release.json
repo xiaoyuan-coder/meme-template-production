@@ -1,11 +1,11 @@
 {
-  "releaseVersion": "0.14.1",
+  "releaseVersion": "0.15.0",
   "skills": {
     "meme-template-image-producer": "0.8.1",
-    "meme-template-json-compiler": "0.14.1",
+    "meme-template-json-compiler": "0.15.0",
     "template-atmosphere-image-producer": "0.1.0"
   },
-  "sharedContractVersion": 6,
+  "sharedContractVersion": 7,
   "galleryContract": {
     "identity": "agent-template-json-runtime-contract-2026-09-08",
     "relativePath": "contracts/upstream/gallery-template/agent-template-json-runtime-contract-2026-09-08/gallery-template.schema.json",

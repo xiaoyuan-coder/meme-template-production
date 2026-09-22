@@ -53,6 +53,7 @@ description: 将用户批准的本地图片或已上传模板图独立分析为�
 - 每槽可选、支持自定义文字，并有三个与默认值同轴、同颗粒度、同语言及表达形式的推荐项；图片是附加能力。
 - Prompt Template 只描述开放给用户修改的画面内容，用容易理解的自然语言完整覆盖槽位与低频自由编辑项，每个槽位恰好出现一次。槽位 label 使用最小充分名称，如“主体”“画面主体”“底部文字”“背景”，避免被当前默认值限定。媒介、画风、质感、光线和固定空间机制进入 visualContract。
 - 完成逐元素路由对账：`componentGraph` 中每个可见元素都明确进入槽位、Prompt 自由编辑、visualContract 固定实现或清理四类路由之一。没有进入槽位的颜色、形状、图案、装饰、容器内容和次要文字，只要允许用户改动，就以当前默认外观进入 Prompt 并建立 `editableFactRouting`。
+- `editableCandidates` 必须对 `componentGraph` 的每个可见组件作出“选中或排除”决议。每个正式槽位在 `slotEvidence` 声明 `controlScope`、`controlledComponentIds` 和值完整性证据；内容槽位控制完整视觉对象或协调组，槽位值不能只留颜色、材质、边缘等修饰词。
 - 为每项可编辑事实建立 `editableFactRouting`，明确它属于 Prompt 或某个槽位，列出 visualContract 中禁止残留的旧值及同义表达，并将包装顶部食物这类联动部件全部纳入 binding 依赖目标。
 - 标题、描述和标签共同表达模板价值与使用动机，避免组件清单和编译术语。
 
@@ -65,6 +66,8 @@ description: 将用户批准的本地图片或已上传模板图独立分析为�
 读取 [gallery-v2.md](references/gallery-v2.md)，按固定 Schema 与生产约束校验草稿。执行分析规范中的同轮 self-review：每项有具体证据，绑定最终草稿 SHA；修改后重新复核。
 
 语义复核需实际代入不同推荐值，检查新内容能否生效、玩法是否保留、其他字段是否仍锁定旧内容。机器校验与语义判断分别完成。全部通过后，首次编译调用 `compile_final_json`，换图或完整重分析返修调用 `compile_template_revision`，不换图的 JSON 返修调用 `compile_json_revision` 或轻量入口。
+
+调整 Skill 或门禁时读取 [regression-gates.md](references/regression-gates.md)。固定 Badcase 只作为只读输入；使用 `evaluate_template_regression_suite` 或命令行入口检查新编译输出，样本缺失本身即为失败。
 
 ### 5. 交付正式数据
 

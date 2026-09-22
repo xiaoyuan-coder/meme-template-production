@@ -259,7 +259,7 @@ def valid_approved_analysis(image_sha: str) -> dict:
         draft, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")).hexdigest()
     return {
-        "schemaVersion": 6,
+        "schemaVersion": 7,
         "approvedImageSha256": image_sha,
         "visualMechanism": "中央主体紧抱宠物的温暖手绘场景",
         "templateValue": {
@@ -350,6 +350,14 @@ def valid_approved_analysis(image_sha: str) -> dict:
             "slotPortability": True,
             "evidence": "描述用日常语言补充模板用法，且不锁定开放值",
         },
+        "taggingProfile": {
+            "matchProfile": {
+                "subjects": [{"subjectKey": "pet.other", "memberCount": 1}],
+                "sourceImageType": "single_identity",
+            },
+            "hiddenTags": ["动物"],
+            "keywords": ["拥抱", "手绘", "温暖", "互动"],
+        },
         "tagEvidence": {
             tag: {
                 "visualEvidence": f"图中可见{tag}特征",
@@ -398,6 +406,9 @@ def valid_approved_analysis(image_sha: str) -> dict:
                     "橘白猫", "三花猫", "银渐层猫", "黑白奶牛猫",
                 ],
                 "bindingKind": "one_to_one",
+                "controlScope": "identity",
+                "controlledComponentIds": ["subject_main"],
+                "valueCompletenessChecks": [],
                 "inheritFromUpload": ["可辨认身份特征", "服装", "表情"],
                 "keepFromTemplate": ["拥抱动作"],
                 "sourceIsolation": True,
@@ -455,6 +466,16 @@ def valid_approved_analysis(image_sha: str) -> dict:
                     "米白纯色背景", "浅灰纯色背景", "暖黄渐变背景", "蓝色纸纹背景",
                 ],
                 "bindingKind": "replace_content",
+                "controlScope": "complete_visual_object",
+                "controlledComponentIds": ["background_canvas"],
+                "valueCompletenessChecks": [{
+                    "value": value,
+                    "completeObject": True,
+                    "objectTerm": "背景",
+                    "evidence": "每个值都包含完整背景对象名词",
+                } for value in (
+                    "米白纯色背景", "浅灰纯色背景", "暖黄渐变背景", "蓝色纸纹背景",
+                )],
                 "visualEvidence": "完整画布背景清晰可见并可独立替换",
             },
         },

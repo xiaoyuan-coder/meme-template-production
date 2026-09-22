@@ -14,7 +14,7 @@
 2. `playDecisionModel`：在看组件清单之前，写出好玩命题、用户重制愿望和核心可执行控制。每项控制只映射一个正式槽位；多个控制可以服务同一更高层使用意图。
 3. `componentGraph/identityTopology/textRegions`：逐一识别主体、实例、物件、文字、箭头、容器、贴纸、商标、遮挡和背景；文字先按句子、笑话、对比或标签系统聚合为语义单元。
 4. `mediumComposition/spatialRelations/containers`：按 [视觉约束规范](visual-contract.md) 的媒介与画风观察方法记录具体画法、区域适用范围和身份继承边界，同时记录构图、光色、动作、接触、持握、穿戴及嵌套关系。
-5. `editableCandidates/slotCoverageReview`：先对八个候选轴做召回检查，再对每个候选做精度门禁，并给出选中或排除理由。先把颜色、形状、材质、图案和边缘归入完整视觉对象，再判断对象槽位与低频自由编辑事实。背景为必查候选，同时记录类型、容器边界、与外围留白的区别及传图价值。
+5. `editableCandidates/slotCoverageReview`：先对八个候选轴做召回检查，再对每个候选做精度门禁，并给出选中或排除理由。`componentGraph` 的每个可见组件都必须在 `editableCandidates` 中被审议，不允许因“属于装饰”而整体漏记。先把颜色、形状、材质、图案和边缘归入完整视觉对象，再判断对象槽位与低频自由编辑事实。背景为必查候选，同时记录类型、容器边界、与外围留白的区别及传图价值。
 6. `editableFactRouting/promptCoverage.visualElementRoutes`：给 Prompt 中每项可编辑视觉事实指定唯一所有者，记录禁止进入 visualContract 的旧值/同义表达，并为槽位事实列全联动目标。然后将 `componentGraph` 每个元素逐一路由到槽位、Prompt 自由编辑、visualContract 或清理，防止“未开槽”的低频可编辑内容从 Prompt 一并消失。
 7. `semanticModel`：从同一个语义模型投影 Prompt Template 和 runtimeSemantics。
 8. `selfReview`：对最终草稿重新复核，绑定草稿 SHA，问题修正后重跑。
@@ -48,9 +48,11 @@
 
 每个 `editableCandidate` 都记录 `selected`、`selectionReason` 和 `exclusionReason`。选中理由只能是 `identity_control/template_hook/high_value_text/exact_content_asset`。普通餐食、背景小物和陪衬装饰不能仅因“肉眼可见”就成为槽位。
 
-每个正式槽位在 `slotEvidence` 中保存：六门禁结果、对应 `decisionId`、默认值、语义轴、颗粒度、输入模式决议、推荐项替换检查、binding 决议和 `openVisualFacts`。每个文字槽还保存 `defaultLanguageReview`；身份槽保存 `identityRecognition`，明确当前图是否已识别出具体身份及其通行姓名。能够从服装、发型、标志、画面文字或其他稳定特征确认具体 IP、真人或历史人物时，必须标记为 `recognized`，正式默认值等于具体通行姓名；不得改写为发色、服装、性别等外观描述来规避专名。证据不足时标记为 `unrecognized`，使用简洁的可见身份描述。`openVisualFacts` 是该槽开放后不得被 title、tag 或 visualContract 锁回的身份、文字、服装、颜色或内容事实。
+每个正式槽位在 `slotEvidence` 中保存：六门禁结果、对应 `decisionId`、默认值、语义轴、颗粒度、输入模式决议、推荐项替换检查、binding 决议和 `openVisualFacts`。同时声明 `controlScope=identity|semantic_text|complete_visual_object|coordinated_group`、`controlledComponentIds` 和 `valueCompletenessChecks`。完整对象与协调组的默认值、三个推荐值必须逐项包含完整对象名词；协调组的 binding 覆盖全部依赖 target。每个文字槽还保存 `defaultLanguageReview`；身份槽保存 `identityRecognition`，明确当前图是否已识别出具体身份及其通行姓名。能够从服装、发型、标志、画面文字或其他稳定特征确认具体 IP、真人或历史人物时，必须标记为 `recognized`，正式默认值等于具体通行姓名；不得改写为发色、服装、性别等外观描述来规避专名。证据不足时标记为 `unrecognized`，使用简洁的可见身份描述。`openVisualFacts` 是该槽开放后不得被 title、tag 或 visualContract 锁回的身份、文字、服装、颜色或内容事实。
 
 `titleEvidence` 同时证明图像根据、使用动机、口语自然、槽位可迁移、用户吸引力和发现价值。`descriptionEvidence` 证明描述面向用户、补充标题、口语自然且不锁定开放值。每个 `tagEvidence` 项除了图像根据和类别，还要写明 `searchIntent`，表示它承接的真实用户查询。
+
+`taggingProfile` 保留图片打标器的 `matchProfile/hiddenTags/keywords`。正式 `metadata.tags` 必须严格等于 `merge_template_discovery_tags(taggingProfile)` 的有序结果，`tagEvidence` 的键集与该结果完全一致。
 
 所有模板都提供 `slotCoverageReview`，逐轴记录 subject、text、object、clothing、color、prop、scene 和 nested content 的候选组件、选中槽位与具体根据。每个正式槽位只在一个主轴出现一次，每个候选组件都被覆盖。背景在 scene 轴必须经过召回和精度判断，只在证据成立时开槽。正式槽位通常为 1–4 个，第五槽需要独立高价值证据；其余可编辑内容进入 Prompt Template，模板实现进入 visualContract。
 

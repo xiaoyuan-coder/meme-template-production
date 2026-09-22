@@ -1,5 +1,5 @@
 {
-  "contractVersion": 13,
+  "contractVersion": 14,
   "deliveryReadback": {
     "surfaceFields": {
       "list": ["key", "title", "description", "cover"],
@@ -136,6 +136,9 @@
     },
     "allowedSlotSelectionReasons": [
       "identity_control", "template_hook", "high_value_text", "exact_content_asset"
+    ],
+    "slotControlScopes": [
+      "identity", "semantic_text", "complete_visual_object", "coordinated_group"
     ],
     "identityRecognitionStatuses": ["recognized", "unrecognized"],
     "recognizedIdentityGenericSuffixes": ["角色", "人物", "主体"],

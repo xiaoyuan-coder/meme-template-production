@@ -13,6 +13,155 @@ compiler = load_module(
 
 
 class EditabilityBadcaseTests(unittest.TestCase):
+    def test_regression_suite_rejects_missing_case_partial_object_and_tag_drift(self):
+        heart = {
+            "key": "heart-card-fixture",
+            "promptTemplate": (
+                '{{ subject | "斑点犬" }}从{{ frame | "蓝色粗边" }}爱心中的云朵'
+                '探出上半身，周围散落小花、草莓和星星；'
+                '{{ slogan | "SO NO MONDAYS" }}拆成彩色泡泡字。'
+            ),
+            "inputSchema": {"slots": [{
+                "id": "subject", "text": {"defaultValue": "斑点犬", "suggestions": []},
+            }, {
+                "id": "frame", "text": {
+                    "defaultValue": "蓝色粗边",
+                    "suggestions": ["粉色粗边", "红色粗边", "彩虹粗边"],
+                },
+            }, {
+                "id": "slogan", "text": {"defaultValue": "SO NO MONDAYS", "suggestions": []},
+            }]},
+            "runtimeSemantics": {
+                "inputBindings": {
+                    "subject": {"targetIds": ["subject"]},
+                    "frame": {"targetIds": ["frame"]},
+                    "slogan": {"targetIds": ["slogan"]},
+                },
+                "visualContract": {
+                    "composition": ["小花、草莓和星星散落四周"],
+                    "styleTraits": ["字母有黑线或花形底"],
+                },
+            },
+            "metadata": {
+                "tags": ["动物", "文字设计", "爱心卡片", "泡泡字", "宠物拼贴", "复古印刷"],
+            },
+        }
+        suite = {
+            "suiteId": "three-editability-badcases",
+            "cases": [{
+                "caseId": "heart-card",
+                "templateKey": "heart-card-fixture",
+                "expectedSlotIds": ["subject", "frame", "decorations", "slogan"],
+                "completeObjectSlots": [{
+                    "slotId": "frame",
+                    "objectTerms": ["爱心", "圆框", "星形框"],
+                }],
+                "editableFacts": [{
+                    "factId": "decorations", "owner": "slot", "slotId": "decorations",
+                    "promptTerms": ["小花、草莓和星星"],
+                    "forbiddenRuntimeTerms": ["小花、草莓和星星"],
+                    "requiredTargetIds": ["flowers", "fruit", "stars"],
+                }],
+                "tagging": {
+                    "matchProfile": {
+                        "subjects": [{"subjectKey": "pet.dog", "memberCount": 1}],
+                        "sourceImageType": "single_identity",
+                    },
+                    "hiddenTags": ["动物", "文字设计"],
+                    "keywords": ["狗", "爱心卡片", "泡泡字", "宠物拼贴", "复古印刷"],
+                },
+            }, {
+                "caseId": "required-second-case",
+                "templateKey": "missing-fixture",
+                "expectedSlotIds": [],
+                "completeObjectSlots": [],
+                "editableFacts": [],
+                "tagging": None,
+            }],
+        }
+
+        report = compiler.evaluate_template_regression_suite([heart], suite)
+        self.assertFalse(report["passed"])
+        codes = {finding["code"] for finding in report["findings"]}
+        self.assertEqual(
+            codes,
+            {
+                "REGRESSION_TEMPLATE_MISSING",
+                "REGRESSION_SLOT_SET_MISMATCH",
+                "REGRESSION_PARTIAL_VISUAL_OBJECT",
+                "EDITABLE_FACT_LOCKED_IN_VISUAL_CONTRACT",
+                "EDITABLE_DEPENDENCY_TARGET_UNBOUND",
+                "REGRESSION_TAG_ASSEMBLY_MISMATCH",
+            },
+        )
+
+    def test_regression_suite_accepts_complete_object_group_binding_and_tags(self):
+        heart = {
+            "key": "heart-card-fixture",
+            "promptTemplate": (
+                '{{ subject | "斑点犬" }}从{{ frame | "蓝色粗边爱心" }}里的白色云朵后'
+                '探出上半身，周围散落{{ decorations | "小花、草莓和星星" }}；'
+                '{{ slogan | "SO NO MONDAYS" }}拆成彩色泡泡字。'
+            ),
+            "inputSchema": {"slots": [{
+                "id": "subject", "text": {"defaultValue": "斑点犬", "suggestions": []},
+            }, {
+                "id": "frame", "text": {
+                    "defaultValue": "蓝色粗边爱心",
+                    "suggestions": ["粉色波浪边爱心", "红色圆框", "彩虹星形框"],
+                },
+            }, {
+                "id": "decorations", "text": {
+                    "defaultValue": "小花、草莓和星星", "suggestions": [],
+                },
+            }, {
+                "id": "slogan", "text": {"defaultValue": "SO NO MONDAYS", "suggestions": []},
+            }]},
+            "runtimeSemantics": {
+                "inputBindings": {
+                    "subject": {"targetIds": ["subject"]},
+                    "frame": {"targetIds": ["frame"]},
+                    "decorations": {"targetIds": ["flowers", "fruit", "stars"]},
+                    "slogan": {"targetIds": ["slogan"]},
+                },
+                "visualContract": {
+                    "composition": ["协调装饰组散落在主体四周"],
+                    "styleTraits": ["保留复古印刷网点"],
+                },
+            },
+            "metadata": {
+                "tags": ["动物", "文字设计", "狗", "爱心卡片", "泡泡字", "宠物拼贴", "复古印刷"],
+            },
+        }
+        suite = {
+            "suiteId": "heart-editability",
+            "cases": [{
+                "caseId": "heart-card",
+                "templateKey": "heart-card-fixture",
+                "expectedSlotIds": ["subject", "frame", "decorations", "slogan"],
+                "completeObjectSlots": [{
+                    "slotId": "frame", "objectTerms": ["爱心", "圆框", "星形框"],
+                }],
+                "editableFacts": [{
+                    "factId": "decorations", "owner": "slot", "slotId": "decorations",
+                    "promptTerms": ["小花、草莓和星星"],
+                    "forbiddenRuntimeTerms": ["小花、草莓和星星"],
+                    "requiredTargetIds": ["flowers", "fruit", "stars"],
+                }],
+                "tagging": {
+                    "matchProfile": {
+                        "subjects": [{"subjectKey": "pet.dog", "memberCount": 1}],
+                        "sourceImageType": "single_identity",
+                    },
+                    "hiddenTags": ["动物", "文字设计"],
+                    "keywords": ["狗", "爱心卡片", "泡泡字", "宠物拼贴", "复古印刷"],
+                },
+            }],
+        }
+
+        report = compiler.evaluate_template_regression_suite([heart], suite)
+        self.assertTrue(report["passed"], report["findings"])
+
     def test_candy_bottom_shape_slot_can_change_color_and_shape(self):
         case = {
             "caseId": "candy-bottom-shape-slot",
