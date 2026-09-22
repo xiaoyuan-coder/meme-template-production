@@ -12,7 +12,7 @@
     }
   },
   "analysis": {
-    "schemaVersion": 4,
+    "schemaVersion": 6,
     "approvedImageSha256": "9d06e4abfc74edc08e4b4443ce6ecd0c21c21c7af1629bb0ab59084fbdd71008",
     "visualMechanism": "中央主体紧抱宠物的温暖手绘场景",
     "templateValue": {
@@ -361,11 +361,43 @@
       "slotIds": [
         "subject"
       ],
-      "freeEditableRegionIds": []
+      "freeEditableRegionIds": [],
+      "editableFactIds": [
+        "subject_identity"
+      ],
+      "visualElementRoutes": [
+        {
+          "componentId": "subject_main",
+          "route": "slot",
+          "slotId": "subject",
+          "factIds": [
+            "subject_identity"
+          ],
+          "evidence": "中央主体由 subject 槽位控制"
+        }
+      ]
     },
+    "editableFactRouting": [
+      {
+        "factId": "subject_identity",
+        "axis": "identity",
+        "owner": "slot",
+        "slotId": "subject",
+        "promptTerms": [
+          "橘白猫"
+        ],
+        "forbiddenRuntimeTerms": [
+          "橘白猫"
+        ],
+        "requiredTargetIds": [
+          "subject_main"
+        ],
+        "evidence": "主体身份由 Prompt Template 中的 subject 槽位提供"
+      }
+    ],
     "translationEquivalences": [],
     "semanticModel": {
-      "promptTemplate": "双臂紧紧抱住画面中央的{{ subject | \"橘白猫\" }}。",
+      "promptTemplate": "画面中央是{{ subject | \"橘白猫\" }}。",
       "runtimeSemantics": {
         "version": 2,
         "targetInstances": [
@@ -434,7 +466,7 @@
     },
     "selfReview": {
       "status": "PASS",
-      "reviewedDraftSha256": "75a8c4156cbc972d86d3414f93e326e1374d1ad6295817596dd6e8735939564d",
+      "reviewedDraftSha256": "32c2f2f214ba5d096fcf2491eb0d6f315e37b456611ff7ae7c0c02b9f27abdf7",
       "checks": {
         "templateValueFocused": {
           "passed": true,
@@ -564,7 +596,7 @@
     "imageSize": "1024x1024",
     "imageN": 1,
     "kind": "PROMPT",
-    "promptTemplate": "双臂紧紧抱住画面中央的{{ subject | \"橘白猫\" }}。",
+    "promptTemplate": "画面中央是{{ subject | \"橘白猫\" }}。",
     "inputSchema": {
       "version": 2,
       "slots": [

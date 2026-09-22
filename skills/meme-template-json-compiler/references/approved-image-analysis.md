@@ -14,9 +14,10 @@
 2. `playDecisionModel`：在看组件清单之前，写出好玩命题、用户重制愿望和核心可执行控制。每项控制只映射一个正式槽位；多个控制可以服务同一更高层使用意图。
 3. `componentGraph/identityTopology/textRegions`：逐一识别主体、实例、物件、文字、箭头、容器、贴纸、商标、遮挡和背景；文字先按句子、笑话、对比或标签系统聚合为语义单元。
 4. `mediumComposition/spatialRelations/containers`：按 [视觉约束规范](visual-contract.md) 的媒介与画风观察方法记录具体画法、区域适用范围和身份继承边界，同时记录构图、光色、动作、接触、持握、穿戴及嵌套关系。
-5. `editableCandidates/slotCoverageReview`：先对八个候选轴做召回检查，再对每个候选做精度门禁，并给出选中或排除理由。
-6. `semanticModel`：从同一个语义模型投影 Prompt Template 和 runtimeSemantics。
-7. `selfReview`：对最终草稿重新复核，绑定草稿 SHA，问题修正后重跑。
+5. `editableCandidates/slotCoverageReview`：先对八个候选轴做召回检查，再对每个候选做精度门禁，并给出选中或排除理由。先把颜色、形状、材质、图案和边缘归入完整视觉对象，再判断对象槽位与低频自由编辑事实。背景为必查候选，同时记录类型、容器边界、与外围留白的区别及传图价值。
+6. `editableFactRouting/promptCoverage.visualElementRoutes`：给 Prompt 中每项可编辑视觉事实指定唯一所有者，记录禁止进入 visualContract 的旧值/同义表达，并为槽位事实列全联动目标。然后将 `componentGraph` 每个元素逐一路由到槽位、Prompt 自由编辑、visualContract 或清理，防止“未开槽”的低频可编辑内容从 Prompt 一并消失。
+7. `semanticModel`：从同一个语义模型投影 Prompt Template 和 runtimeSemantics。
+8. `selfReview`：对最终草稿重新复核，绑定草稿 SHA，问题修正后重跑。
 
 `templateValue` 至少包含：
 
@@ -51,7 +52,9 @@
 
 `titleEvidence` 同时证明图像根据、使用动机、口语自然、槽位可迁移、用户吸引力和发现价值。`descriptionEvidence` 证明描述面向用户、补充标题、口语自然且不锁定开放值。每个 `tagEvidence` 项除了图像根据和类别，还要写明 `searchIntent`，表示它承接的真实用户查询。
 
-所有模板都提供 `slotCoverageReview`，逐轴记录 subject、text、object、clothing、color、prop、scene 和 nested content 的候选组件、选中槽位与具体根据。每个正式槽位只在一个主轴出现一次，每个候选组件都被覆盖。正式槽位优先保持在 2–4 个；覆盖评审只得到一个核心控制时，单槽合法。超过四个候选时，把次要文字转入 `free_editable`，把普通支持细节保持固定，或在后端确有统一 binding 时合并同一语义轴的控件；不得交付五个及以上槽位。
+所有模板都提供 `slotCoverageReview`，逐轴记录 subject、text、object、clothing、color、prop、scene 和 nested content 的候选组件、选中槽位与具体根据。每个正式槽位只在一个主轴出现一次，每个候选组件都被覆盖。背景在 scene 轴必须经过召回和精度判断，只在证据成立时开槽。正式槽位通常为 1–4 个，第五槽需要独立高价值证据；其余可编辑内容进入 Prompt Template，模板实现进入 visualContract。
+
+`promptCoverage.visualElementRoutes` 与 `componentGraph[].componentId` 完全对账。每项包含 `componentId/route/evidence`；`route=slot` 时同时给出 `slotId/factIds`，`route=prompt` 时给出 `factIds`，`route=visual_contract` 时给出 `contractFields`，`route=remove` 时不引用事实或字段。组合槽位可让多个组件共享同一 `slotId` 和事实，但 binding 必须列全各组件对应的目标。
 
 所有正式槽位都具有文字输入；图片能力只在用户自然拥有素材且输入到目标的映射清楚时附加。固定可寻址主体使用 `one_to_one`；同一身份重复实例使用 `same_source_repeated`。只有整组身份保真、自然合照输入、人数可变、成员同类和无独立角色五项全部为真时使用文字+图片的 `preserve_group`。固定 CP 和具有独立角色位的双人合照按独立身份拆分。密集同类主体继续检查有无可单独指定的焦点身份；由一个类别概念共同驱动、位置数量确属玩法的集合使用普通文字槽，并由后端保留数量与排列。
 
@@ -69,7 +72,7 @@
 
 `semanticUnitRole` 只使用 `independent_message/distributed_message/supporting_copy/fixed_context/noise/ambiguous`。同一语义单元的文字区必须路由到同一动作；使用 `open_slot` 时必须指向同一个真实文字槽。
 
-`free_editable` 的精确默认文字必须出现在 Prompt Template 的自然叙述中；`preserve` 必须在 visualContract 中保留内容和版式；`remove` 不得进入两个表面；`review` 未解决时阻断编译。这使两种编辑模式共享同一份 Prompt Template，同时保持槽位数量只服务高价值快捷编辑。
+`free_editable` 的精确默认文字必须出现在 Prompt Template 的自然叙述中，并在 `editableFactRouting` 中使用 `owner=prompt`；`preserve` 必须在 visualContract 中保留内容和版式；`remove` 不得进入两个表面；`review` 未解决时阻断编译。
 
 翻译区使用 `translation_equivalence`，通过源区/目标区 ID 和各自 exactText SHA 建立等价关系；任何文字变化都会使旧证据失效。
 
@@ -77,7 +80,7 @@
 
 `semanticModel` 是 Prompt Template 与 runtimeSemantics 的共同中间模型。`compile_semantics_from_analysis` 同时投影两者，正式草稿与任一投影发生手工漂移即拒绝。
 
-每个槽位必须在 Prompt Template 中出现一次精确占位符；文字 fallback 与默认值一致。每个 input binding 恰好对应一个正式槽位。每个 identity target 都有完整重绘声明，每个图片槽位都有唯一素材源声明。`openVisualFacts` 不得出现在 visualContract；`backendOnlyFacts` 必须进入 visualContract 且不得进入 Prompt Template。
+每个槽位必须在 Prompt Template 中出现一次精确占位符；文字 fallback 与默认值一致。每个 input binding 恰好对应一个正式槽位。每个 identity target 都有完整重绘声明，每个图片槽位都有唯一素材源声明。`openVisualFacts` 不得出现在 visualContract；`editableFactRouting` 进一步覆盖自由编辑事实、同义残留和联动目标；`backendOnlyFacts` 必须进入 visualContract 且不得进入 Prompt Template。
 
 首次开放或返修新增槽位时，执行 [返修与读回校验.md](返修与读回校验.md) 的“开放新槽后的依赖复核”，检查目标定位等字段中残留的默认内容约束。
 

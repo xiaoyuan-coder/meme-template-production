@@ -27,7 +27,7 @@ def valid_formal_draft(key: str = "hug-your-pet") -> dict:
         "imageSize": "1024x1024",
         "imageN": 1,
         "kind": "PROMPT",
-        "promptTemplate": "双臂紧紧抱住画面中央的{{ subject | \"橘白猫\" }}。",
+        "promptTemplate": "画面中央是{{ subject | \"橘白猫\" }}，背景为{{ background | \"米白纯色背景\" }}。",
         "inputSchema": {
             "version": 2,
             "slots": [{
@@ -51,6 +51,17 @@ def valid_formal_draft(key: str = "hug-your-pet") -> dict:
                     "sourceOptions": ["upload", "recent_upload", "asset_library"],
                 },
                 "resolutionStrategy": "image_over_text",
+            }, {
+                "id": "background",
+                "label": "背景",
+                "required": False,
+                "text": {
+                    "allowCustom": True,
+                    "placeholder": "选择或输入背景",
+                    "suggestions": ["浅灰纯色背景", "暖黄渐变背景", "蓝色纸纹背景"],
+                    "defaultValue": "米白纯色背景",
+                    "presentation": "suggestions",
+                },
             }],
         },
         "preprocessSteps": [],
@@ -61,6 +72,11 @@ def valid_formal_draft(key: str = "hug-your-pet") -> dict:
                 "kind": "identity_subject",
                 "role": "画面中心的拥抱主体",
                 "region": "画面中心",
+            }, {
+                "id": "background_canvas",
+                "kind": "content_element",
+                "role": "画布背景",
+                "region": "前景主角后方的完整画布",
             }],
             "inputBindings": {
                 "subject": {
@@ -71,14 +87,20 @@ def valid_formal_draft(key: str = "hug-your-pet") -> dict:
                     "allowedSourceGrouping": ["single_subject"],
                     "groupToSinglePolicy": "reject",
                     "clothingOwnership": "source",
-                }
+                },
+                "background": {
+                    "operation": "replace_content",
+                    "targetIds": ["background_canvas"],
+                    "distributionPolicy": "replace_as_unit",
+                },
             },
             "visualContract": {
                 "medium": "温暖手绘插画",
                 "styleTraits": ["简洁线条"],
-                "composition": ["主体居中"],
+                "composition": ["主角居中，背景铺满完整画布"],
                 "relations": [
                     "保持拥抱接触",
+                    "背景位于主角后方且不遮挡主要轮廓",
                     "身份目标完整重绘并统一为温暖手绘媒介",
                 ],
                 "colorAndLight": ["柔和暖色光"],
@@ -237,7 +259,7 @@ def valid_approved_analysis(image_sha: str) -> dict:
         draft, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")).hexdigest()
     return {
-        "schemaVersion": 4,
+        "schemaVersion": 6,
         "approvedImageSha256": image_sha,
         "visualMechanism": "中央主体紧抱宠物的温暖手绘场景",
         "templateValue": {
@@ -254,17 +276,23 @@ def valid_approved_analysis(image_sha: str) -> dict:
                 "description": "选择中央被拥抱的宠物身份",
                 "slotId": "subject",
                 "evidence": "中央宠物是用户个性化结果的焦点",
+            }, {
+                "decisionId": "choose_background",
+                "description": "选择画布背景",
+                "slotId": "background",
+                "evidence": "本模板背景边界清楚，替换后不破坏拥抱机制",
             }],
         },
         "componentGraph": [
-            {"componentId": "subject_main", "role": "identity_subject", "region": "center"}
+            {"componentId": "subject_main", "role": "identity_subject", "region": "center"},
+            {"componentId": "background_canvas", "role": "background", "region": "full_canvas"},
         ],
         "identityTopology": [{"identityUnitId": "subject", "instanceIds": ["subject_main"]}],
         "textRegions": [],
         "mediumComposition": {
             "medium": "温暖手绘插画",
             "styleTraits": ["简洁线条"],
-            "composition": ["主体居中"],
+            "composition": ["主角居中，背景铺满完整画布"],
             "colorAndLight": ["柔和暖色光"],
         },
         "spatialRelations": [{"type": "hug_contact", "members": ["subject_main"]}],
@@ -273,13 +301,24 @@ def valid_approved_analysis(image_sha: str) -> dict:
         "editableCandidates": [{
             "slotId": "subject", "componentId": "subject_main", "selected": True,
             "selectionReason": "identity_control", "exclusionReason": None,
+        }, {
+            "slotId": "background", "componentId": "background_canvas", "selected": True,
+            "selectionReason": "template_hook", "exclusionReason": None,
         }],
         "slotCoverageReview": {
-            "selectedSlotIds": ["subject"],
+            "selectedSlotIds": ["subject", "background"],
             "axes": {
                 axis: {
-                    "candidateComponentIds": ["subject_main"] if axis == "subject" else [],
-                    "selectedSlotIds": ["subject"] if axis == "subject" else [],
+                    "candidateComponentIds": (
+                        ["subject_main"] if axis == "subject"
+                        else ["background_canvas"] if axis == "scene"
+                        else []
+                    ),
+                    "selectedSlotIds": (
+                        ["subject"] if axis == "subject"
+                        else ["background"] if axis == "scene"
+                        else []
+                    ),
                     "evidence": f"approved image reviewed for {axis}",
                 }
                 for axis in (
@@ -292,7 +331,7 @@ def valid_approved_analysis(image_sha: str) -> dict:
             "identityCount": 1,
             "visualInstanceCount": 1,
             "uploadAssetCount": 1,
-            "inputControlCount": 1,
+            "inputControlCount": 2,
         },
         "fieldEvidence": {field: [f"approved image evidence for {field}"] for field in evidence_fields},
         "titleEvidence": {
@@ -384,13 +423,79 @@ def valid_approved_analysis(image_sha: str) -> dict:
                                "evidence": "拥抱动作是模板机制"},
                 },
                 "visualEvidence": "中央主体清晰可寻址且替换后保留拥抱机制",
-            }
+            },
+            "background": {
+                "userMotivation": True,
+                "independentUserChoice": True,
+                "meaningfulVariation": True,
+                "visuallyVisible": True,
+                "modelControllable": True,
+                "mechanismPreserved": True,
+                "selectionReason": "template_hook",
+                "decisionId": "choose_background",
+                "defaultValue": "米白纯色背景",
+                "semanticAxis": "画布背景",
+                "granularity": "单一背景设定",
+                "defaultLanguageReview": {
+                    "natural": True,
+                    "concise": True,
+                    "modifierMinimal": True,
+                },
+                "inputModeDecision": {
+                    "modes": ["text"],
+                    "reason": "text_only",
+                    "evidence": "背景可用文字稳定指定，无需精确素材映射",
+                },
+                "suggestionChecks": [
+                    {"value": value, "sameAxis": True, "sameGranularity": True,
+                     "mechanismCompatible": True}
+                    for value in ("浅灰纯色背景", "暖黄渐变背景", "蓝色纸纹背景")
+                ],
+                "openVisualFacts": [
+                    "米白纯色背景", "浅灰纯色背景", "暖黄渐变背景", "蓝色纸纹背景",
+                ],
+                "bindingKind": "replace_content",
+                "visualEvidence": "完整画布背景清晰可见并可独立替换",
+            },
         },
         "promptCoverage": {
             "allEditableContentCovered": True,
-            "slotIds": ["subject"],
+            "slotIds": ["subject", "background"],
             "freeEditableRegionIds": [],
+            "editableFactIds": ["subject_identity", "background_appearance"],
+            "visualElementRoutes": [{
+                "componentId": "subject_main",
+                "route": "slot",
+                "slotId": "subject",
+                "factIds": ["subject_identity"],
+                "evidence": "中央主体由 subject 槽位控制",
+            }, {
+                "componentId": "background_canvas",
+                "route": "slot",
+                "slotId": "background",
+                "factIds": ["background_appearance"],
+                "evidence": "完整画布背景由 background 槽位控制",
+            }],
         },
+        "editableFactRouting": [{
+            "factId": "subject_identity",
+            "axis": "identity",
+            "owner": "slot",
+            "slotId": "subject",
+            "promptTerms": ["橘白猫"],
+            "forbiddenRuntimeTerms": ["橘白猫"],
+            "requiredTargetIds": ["subject_main"],
+            "evidence": "主体身份在 Prompt Template 中由 subject 槽位编辑",
+        }, {
+            "factId": "background_appearance",
+            "axis": "background",
+            "owner": "slot",
+            "slotId": "background",
+            "promptTerms": ["米白纯色背景"],
+            "forbiddenRuntimeTerms": ["米白纯色背景"],
+            "requiredTargetIds": ["background_canvas"],
+            "evidence": "背景外观在 Prompt Template 中由 background 槽位编辑",
+        }],
         "translationEquivalences": [],
         "semanticModel": {
             "promptTemplate": draft["promptTemplate"],
@@ -399,9 +504,16 @@ def valid_approved_analysis(image_sha: str) -> dict:
                 "subject_main": {
                     "targetIds": ["subject_main"],
                     "visualContractFields": ["medium", "styleTraits", "composition", "relations", "colorAndLight"],
+                },
+                "background_canvas": {
+                    "targetIds": ["background_canvas"],
+                    "visualContractFields": ["composition", "relations", "colorAndLight"],
                 }
             },
-            "dynamicFactSources": {"subject": "inputSchema.slots.subject"},
+            "dynamicFactSources": {
+                "subject": "inputSchema.slots.subject",
+                "background": "inputSchema.slots.background",
+            },
             "completeRedrawByTarget": {"subject_main": True},
             "sourceIsolationByInput": {"subject": True},
         },

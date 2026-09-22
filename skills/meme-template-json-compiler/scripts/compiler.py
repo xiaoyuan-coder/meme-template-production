@@ -100,6 +100,85 @@ def sha256_json(value: Any) -> str:
     return _sha_bytes(encoded)
 
 
+def _validate_no_excluded_presentation_tags(tags: Sequence[str], authoring: Mapping[str, Any]) -> None:
+    excluded = set(authoring["tagAssembly"]["excludedPresentationTags"])
+    rejected = sorted(set(tags).intersection(excluded))
+    if rejected:
+        raise ContractError(f"tags contain low-value presentation labels: {rejected}")
+
+
+def merge_template_discovery_tags(tagging: Mapping[str, Any]) -> list[str]:
+    """Validate image-tagger output and stably merge hiddenTags + keywords."""
+
+    if not isinstance(tagging, Mapping) or set(tagging) != {"matchProfile", "keywords", "hiddenTags"}:
+        raise ContractError("tagging output requires only matchProfile, keywords, and hiddenTags")
+    authoring = _contract()["authoring"]
+    assembly = authoring["tagAssembly"]
+    hidden_tags = tagging.get("hiddenTags")
+    keywords = tagging.get("keywords")
+    if (
+        not isinstance(hidden_tags, list)
+        or not assembly["hiddenMinimum"] <= len(hidden_tags) <= assembly["hiddenMaximum"]
+        or not all(isinstance(tag, str) and tag in authoring["majorTagValues"] for tag in hidden_tags)
+    ):
+        raise ContractError("hiddenTags must contain 1–2 official major categories")
+    if (
+        not isinstance(keywords, list)
+        or not assembly["keywordMinimum"] <= len(keywords) <= assembly["keywordMaximum"]
+        or not all(isinstance(tag, str) and tag.strip() for tag in keywords)
+    ):
+        raise ContractError("keywords must contain 4–6 non-empty strings")
+    merged = list(hidden_tags) + list(keywords)
+    if len(set(merged)) != len(merged):
+        raise ContractError("hiddenTags and keywords must be unique and non-overlapping")
+    if any(len(tag) > authoring["tagMaxLength"] for tag in merged):
+        raise ContractError("tagging output contains a value longer than 12 characters")
+    if set(keywords).intersection(authoring["majorTagValues"]):
+        raise ContractError("keywords must not repeat official major categories")
+    _validate_no_excluded_presentation_tags(merged, authoring)
+
+    match_profile = tagging.get("matchProfile")
+    if not isinstance(match_profile, Mapping) or set(match_profile) != {"subjects", "sourceImageType"}:
+        raise ContractError("matchProfile requires only subjects and sourceImageType")
+    subjects = match_profile.get("subjects")
+    if not isinstance(subjects, list) or len(subjects) != 1 or not isinstance(subjects[0], Mapping):
+        raise ContractError("matchProfile.subjects must contain exactly one subject")
+    subject = subjects[0]
+    if set(subject) != {"subjectKey", "memberCount"}:
+        raise ContractError("tagging subject requires only subjectKey and memberCount")
+    subject_key = subject.get("subjectKey")
+    member_count = subject.get("memberCount")
+    allowed_subject_keys = {
+        "person", "pet.cat", "pet.dog", "pet.rabbit", "pet.bird", "pet.hamster",
+        "pet.other", "food", "object", "scenery", "text_image", "other",
+    }
+    if subject_key not in allowed_subject_keys:
+        raise ContractError("tagging subjectKey is invalid")
+    identity_subject = subject_key == "person" or subject_key.startswith("pet.")
+    if not isinstance(member_count, int) or isinstance(member_count, bool):
+        raise ContractError("tagging memberCount must be an integer")
+    if (identity_subject and member_count < 1) or (not identity_subject and member_count != 0):
+        raise ContractError("tagging memberCount conflicts with subjectKey")
+    source_image_type = match_profile.get("sourceImageType")
+    allowed_source_types = {"non_identity", "single_identity", "group_identity", "multi_identity_composite"}
+    if source_image_type not in allowed_source_types:
+        raise ContractError("tagging sourceImageType is invalid")
+    if identity_subject and member_count == 1 and source_image_type != "single_identity":
+        raise ContractError("single identity subjects require sourceImageType=single_identity")
+    if identity_subject and member_count > 1 and source_image_type not in {"group_identity", "multi_identity_composite"}:
+        raise ContractError("multiple identity subjects require a multi-person sourceImageType")
+    if not identity_subject and source_image_type != "non_identity":
+        raise ContractError("non-identity subjects require sourceImageType=non_identity")
+    if subject_key.startswith("pet.") and "动物" not in hidden_tags:
+        raise ContractError("pet templates require the 动物 hiddenTag")
+    animal_keyword = assembly["animalKeywordBySubjectKey"].get(subject_key)
+    if animal_keyword is not None and animal_keyword not in keywords:
+        raise ContractError(f"{subject_key} templates require the keyword {animal_keyword}")
+    if not authoring["tagMinimum"] <= len(merged) <= authoring["tagMaximum"]:
+        raise ContractError("merged tags must contain 5–8 items")
+    return merged
+
+
 def _validate_key(value: Any) -> str:
     if not isinstance(value, str) or not re.fullmatch(_contract()["keyPattern"], value):
         raise ContractError("key does not match the production pattern")
@@ -338,6 +417,180 @@ def _flatten_text(value: Any) -> str:
     return ""
 
 
+def _flatten_text_with_paths(value: Any, path: str = "visualContract") -> list[tuple[str, str]]:
+    """Return leaf strings with stable dotted paths for data-quality findings."""
+    if isinstance(value, str):
+        return [(path, value)]
+    if isinstance(value, Mapping):
+        return [
+            item
+            for key, child in value.items()
+            for item in _flatten_text_with_paths(child, f"{path}.{key}")
+        ]
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [
+            item
+            for index, child in enumerate(value)
+            for item in _flatten_text_with_paths(child, f"{path}[{index}]")
+        ]
+    return []
+
+
+def evaluate_editability_case(case: Mapping[str, Any]) -> dict[str, Any]:
+    """Audit one authored or regression case for Prompt/Runtime ownership conflicts.
+
+    The evaluator is deliberately evidence-driven: callers declare the editable
+    facts, their Prompt terms, legacy Runtime terms, and dependent targets. This
+    keeps the gate deterministic and makes every finding traceable to a field.
+    """
+    required = {
+        "caseId", "promptTemplate", "visualContract", "inputBindings", "editableFacts"
+    }
+    if not isinstance(case, Mapping) or set(case) != required:
+        raise ContractError("editability case fields are incomplete")
+    case_id = _non_empty_text(case["caseId"], "editability caseId")
+    prompt = _non_empty_text(case["promptTemplate"], "editability promptTemplate")
+    if not isinstance(case["visualContract"], Mapping):
+        raise ContractError("editability visualContract must be an object")
+    if not isinstance(case["inputBindings"], Mapping):
+        raise ContractError("editability inputBindings must be an object")
+    facts = case["editableFacts"]
+    if not isinstance(facts, list) or not facts:
+        raise ContractError("editability case requires editableFacts")
+
+    findings: list[dict[str, Any]] = []
+    leaves = _flatten_text_with_paths(case["visualContract"])
+    fact_ids: set[str] = set()
+    for fact in facts:
+        if not isinstance(fact, Mapping):
+            raise ContractError("editableFacts entries must be objects")
+        owner = fact.get("owner")
+        expected = {
+            "factId", "owner", "promptTerms", "forbiddenRuntimeTerms", "requiredTargetIds"
+        }
+        if owner == "slot":
+            expected.add("slotId")
+        if set(fact) != expected or owner not in {"prompt", "slot"}:
+            raise ContractError("editable fact fields or owner are invalid")
+        fact_id = _non_empty_text(fact["factId"], "editable factId")
+        if fact_id in fact_ids:
+            raise ContractError("editable fact IDs must be unique")
+        fact_ids.add(fact_id)
+        for name in ("promptTerms", "forbiddenRuntimeTerms", "requiredTargetIds"):
+            values = fact[name]
+            if not isinstance(values, list) or len(values) != len(set(values)) or any(
+                not isinstance(value, str) or not value.strip() for value in values
+            ):
+                raise ContractError(f"editable fact {name} must contain unique non-empty strings")
+        if not fact["promptTerms"]:
+            raise ContractError("editable fact requires at least one Prompt term")
+
+        for term in fact["promptTerms"]:
+            if term not in prompt:
+                findings.append({
+                    "code": "EDITABLE_FACT_MISSING_FROM_PROMPT",
+                    "factId": fact_id,
+                    "term": term,
+                    "path": "promptTemplate",
+                })
+        for term in fact["forbiddenRuntimeTerms"]:
+            for path, text_value in leaves:
+                if term in text_value:
+                    findings.append({
+                        "code": "EDITABLE_FACT_LOCKED_IN_VISUAL_CONTRACT",
+                        "factId": fact_id,
+                        "term": term,
+                        "path": path,
+                    })
+
+        if owner == "slot":
+            slot_id = _non_empty_text(fact["slotId"], "editable slotId")
+            binding = case["inputBindings"].get(slot_id)
+            bound_targets = set(binding.get("targetIds", [])) if isinstance(binding, Mapping) else set()
+            for target_id in fact["requiredTargetIds"]:
+                if target_id not in bound_targets:
+                    findings.append({
+                        "code": "EDITABLE_DEPENDENCY_TARGET_UNBOUND",
+                        "factId": fact_id,
+                        "term": target_id,
+                        "path": f"inputBindings.{slot_id}.targetIds",
+                    })
+        elif fact["requiredTargetIds"]:
+            raise ContractError("Prompt-owned facts cannot declare slot binding targets")
+
+    return {"caseId": case_id, "passed": not findings, "findings": findings}
+
+
+def _validate_editable_fact_routing(
+    analysis: Mapping[str, Any], formal_draft: Mapping[str, Any]
+) -> None:
+    facts = analysis["editableFactRouting"]
+    if not isinstance(facts, list) or not facts:
+        raise ContractError("editableFactRouting requires at least one editable fact")
+    allowed_axes = set(_contract()["authoring"]["editableFactAxes"])
+    normalized: list[dict[str, Any]] = []
+    fact_ids: list[str] = []
+    slot_owners: set[str] = set()
+    for fact in facts:
+        if not isinstance(fact, Mapping):
+            raise ContractError("editableFactRouting entries must be objects")
+        owner = fact.get("owner")
+        expected = {
+            "factId", "axis", "owner", "promptTerms", "forbiddenRuntimeTerms",
+            "requiredTargetIds", "evidence",
+        }
+        if owner == "slot":
+            expected.add("slotId")
+        if set(fact) != expected or owner not in {"prompt", "slot"}:
+            raise ContractError("editableFactRouting fields or owner are invalid")
+        fact_id = _non_empty_text(fact.get("factId"), "editable factId")
+        fact_ids.append(fact_id)
+        if fact.get("axis") not in allowed_axes:
+            raise ContractError("editable fact axis is invalid")
+        _non_empty_text(fact.get("evidence"), "editable fact evidence")
+        prompt_terms = fact.get("promptTerms")
+        forbidden_terms = fact.get("forbiddenRuntimeTerms")
+        if not isinstance(prompt_terms, list) or not isinstance(forbidden_terms, list):
+            raise ContractError("editable fact Prompt and Runtime terms must be arrays")
+        if not set(prompt_terms).issubset(forbidden_terms):
+            raise ContractError("every editable Prompt term must be excluded from visualContract")
+        normalized_fact = {
+            key: deepcopy(fact[key])
+            for key in (
+                "factId", "owner", "promptTerms", "forbiddenRuntimeTerms", "requiredTargetIds"
+            )
+        }
+        if owner == "slot":
+            slot_id = _non_empty_text(fact.get("slotId"), "editable fact slotId")
+            if not fact.get("requiredTargetIds"):
+                raise ContractError("slot-owned editable facts require at least one target")
+            normalized_fact["slotId"] = slot_id
+            slot_owners.add(slot_id)
+        normalized.append(normalized_fact)
+    if len(fact_ids) != len(set(fact_ids)):
+        raise ContractError("editable fact IDs must be unique")
+
+    slot_ids = {slot["id"] for slot in formal_draft["inputSchema"]["slots"]}
+    if slot_owners != slot_ids:
+        raise ContractError("every slot must own at least one editable fact")
+    covered_fact_ids = analysis["promptCoverage"].get("editableFactIds")
+    if not isinstance(covered_fact_ids, list) or set(covered_fact_ids) != set(fact_ids):
+        raise ContractError("promptTemplate coverage must name every editable fact")
+
+    report = evaluate_editability_case({
+        "caseId": formal_draft["key"],
+        "promptTemplate": formal_draft["promptTemplate"],
+        "visualContract": formal_draft["runtimeSemantics"]["visualContract"],
+        "inputBindings": formal_draft["runtimeSemantics"]["inputBindings"],
+        "editableFacts": normalized,
+    })
+    if report["findings"]:
+        finding = report["findings"][0]
+        raise ContractError(
+            f"{finding['code']}: {finding['factId']} at {finding['path']} ({finding['term']})"
+        )
+
+
 _PROMPT_SLOT = re.compile(
     r'\{\{\s*([a-z][a-z0-9_]*)\s*\|\s*"([^"{}]*)"\s*\}\}'
 )
@@ -384,7 +637,7 @@ def validate_approved_image_analysis(
         "schemaVersion", "approvedImageSha256", "visualMechanism", "componentGraph",
         "templateValue", "playDecisionModel",
         "identityTopology", "textRegions", "mediumComposition", "spatialRelations",
-        "containers", "fixedStructure", "editableCandidates", "slotCoverageReview", "counts", "fieldEvidence",
+        "containers", "fixedStructure", "editableCandidates", "editableFactRouting", "slotCoverageReview", "counts", "fieldEvidence",
         "titleEvidence", "descriptionEvidence", "tagEvidence", "slotEvidence", "promptCoverage",
         "translationEquivalences", "semanticModel", "selfReview",
         "warnings",
@@ -395,8 +648,8 @@ def validate_approved_image_analysis(
             f"approved image analysis fields mismatch; missing={sorted(required - analysis.keys())}, "
             f"extra={sorted(analysis.keys() - allowed)}"
         )
-    if analysis["schemaVersion"] != 4:
-        raise ContractError("approved image analysis schemaVersion must be 4")
+    if analysis["schemaVersion"] != 6:
+        raise ContractError("approved image analysis schemaVersion must be 6")
     if analysis["approvedImageSha256"] != approved_image["image"]["sha256"]:
         raise ContractError("approved image analysis belongs to another image")
     _non_empty_text(analysis["visualMechanism"], "visualMechanism")
@@ -739,6 +992,7 @@ def validate_authoring_contract(
         not isinstance(tag, str) or not tag or len(tag) > authoring["tagMaxLength"] for tag in tags
     ):
         raise ContractError("tags must be unique, non-empty, and at most 12 characters")
+    _validate_no_excluded_presentation_tags(tags, authoring)
     tag_evidence = analysis["tagEvidence"]
     if not isinstance(tag_evidence, Mapping) or set(tag_evidence) != set(tags):
         raise ContractError("every tag requires image evidence")
@@ -757,10 +1011,12 @@ def validate_authoring_contract(
         raise ContractError("inputSchema requires at least one slot")
     slot_count_preference = authoring["slotCountPreference"]
     if len(slots) > slot_count_preference["maximum"]:
-        raise ContractError("production templates allow at most four high-value slots")
+        raise ContractError("production templates allow at most five evidence-backed slots")
     slot_ids = [slot.get("id") for slot in slots]
     if any(not isinstance(slot_id, str) or not slot_id for slot_id in slot_ids) or len(set(slot_ids)) != len(slot_ids):
         raise ContractError("slot IDs must be unique and non-empty")
+    if any(not isinstance(slot.get("label"), str) or not slot["label"].strip() for slot in slots):
+        raise ContractError("slot labels must be non-empty user-facing language")
     _validate_quick_text_slot_lengths(
         slots, analysis["textRegions"], authoring["quickTextLimits"]
     )
@@ -1087,6 +1343,85 @@ def validate_authoring_contract(
     }
     if set(prompt_coverage["freeEditableRegionIds"]) != expected_free_regions:
         raise ContractError("promptTemplate coverage differs from free-editable text regions")
+    component_ids = [
+        component.get("componentId")
+        for component in analysis["componentGraph"]
+        if isinstance(component, Mapping)
+    ]
+    if (
+        len(component_ids) != len(analysis["componentGraph"])
+        or any(not isinstance(component_id, str) or not component_id.strip() for component_id in component_ids)
+        or len(component_ids) != len(set(component_ids))
+    ):
+        raise ContractError("componentGraph requires unique non-empty componentId values")
+    element_routes = prompt_coverage.get("visualElementRoutes")
+    if not isinstance(element_routes, list) or not element_routes:
+        raise ContractError("promptTemplate coverage requires visual element routes")
+    routed_component_ids = [
+        route.get("componentId") for route in element_routes if isinstance(route, Mapping)
+    ]
+    if (
+        len(routed_component_ids) != len(element_routes)
+        or len(routed_component_ids) != len(set(routed_component_ids))
+        or set(routed_component_ids) != set(component_ids)
+    ):
+        raise ContractError("visual element routes must cover componentGraph exactly once")
+    fact_by_id = {fact["factId"]: fact for fact in analysis["editableFactRouting"]}
+    routed_fact_ids: set[str] = set()
+    visual_contract_fields = {
+        "medium", "styleTraits", "composition", "relations", "colorAndLight"
+    }
+    for route in element_routes:
+        route_kind = route.get("route")
+        _non_empty_text(route.get("evidence"), "visual element route evidence")
+        common = {"componentId", "route", "evidence"}
+        if route_kind == "slot":
+            if set(route) != common | {"slotId", "factIds"}:
+                raise ContractError("slot visual element route fields are invalid")
+            slot_id = _non_empty_text(route.get("slotId"), "visual element route slotId")
+            if slot_id not in slot_ids:
+                raise ContractError("visual element route names an unknown slot")
+            fact_ids = route.get("factIds")
+            if not isinstance(fact_ids, list) or not fact_ids or len(fact_ids) != len(set(fact_ids)):
+                raise ContractError("slot visual element route requires unique factIds")
+            if any(
+                fact_id not in fact_by_id
+                or fact_by_id[fact_id].get("owner") != "slot"
+                or fact_by_id[fact_id].get("slotId") != slot_id
+                for fact_id in fact_ids
+            ):
+                raise ContractError("slot visual element route fact ownership is inconsistent")
+            routed_fact_ids.update(fact_ids)
+        elif route_kind == "prompt":
+            if set(route) != common | {"factIds"}:
+                raise ContractError("Prompt visual element route fields are invalid")
+            fact_ids = route.get("factIds")
+            if not isinstance(fact_ids, list) or not fact_ids or len(fact_ids) != len(set(fact_ids)):
+                raise ContractError("Prompt visual element route requires unique factIds")
+            if any(
+                fact_id not in fact_by_id or fact_by_id[fact_id].get("owner") != "prompt"
+                for fact_id in fact_ids
+            ):
+                raise ContractError("Prompt visual element route fact ownership is inconsistent")
+            routed_fact_ids.update(fact_ids)
+        elif route_kind == "visual_contract":
+            if set(route) != common | {"contractFields"}:
+                raise ContractError("visual-contract element route fields are invalid")
+            contract_fields = route.get("contractFields")
+            if (
+                not isinstance(contract_fields, list)
+                or not contract_fields
+                or len(contract_fields) != len(set(contract_fields))
+                or not set(contract_fields).issubset(visual_contract_fields)
+            ):
+                raise ContractError("visual-contract element route requires valid contractFields")
+        elif route_kind == "remove":
+            if set(route) != common:
+                raise ContractError("remove visual element route fields are invalid")
+        else:
+            raise ContractError("visual element route kind is invalid")
+    if routed_fact_ids != set(fact_by_id):
+        raise ContractError("visual element routes must reference every editable fact")
     visual_contract = formal_draft["runtimeSemantics"]["visualContract"]
     visual_text = _flatten_text(visual_contract)
     for region in analysis["textRegions"]:
@@ -1110,8 +1445,9 @@ def validate_authoring_contract(
         for fact in evidence["openVisualFacts"]:
             if fact in visual_text:
                 raise ContractError(f"visualContract locks back an open value from {slot_id}")
-            if fact in title or fact in tags:
-                raise ContractError(f"title or tags lock back an open value from {slot_id}")
+            if fact in title:
+                raise ContractError(f"title locks back an open value from {slot_id}")
+    _validate_editable_fact_routing(analysis, formal_draft)
     _validate_self_review(
         analysis["selfReview"], set(authoring["selfReviewChecks"]), formal_draft
     )
@@ -1150,6 +1486,7 @@ def validate_formal_json(formal: Mapping[str, Any]) -> None:
         not isinstance(tag, str) or not tag or len(tag) > authoring["tagMaxLength"] for tag in tags
     ):
         raise ContractError("production tags violate uniqueness or length limits")
+    _validate_no_excluded_presentation_tags(tags, authoring)
     if not set(tags).intersection(authoring["majorTagValues"]):
         raise ContractError("production tags require an official major category")
     prompt = formal.get("promptTemplate")
@@ -1159,7 +1496,7 @@ def validate_formal_json(formal: Mapping[str, Any]) -> None:
         raise ContractError("production promptTemplate exposes internal terminology")
     slots = formal.get("inputSchema", {}).get("slots", [])
     if len(slots) > authoring["slotCountPreference"]["maximum"]:
-        raise ContractError("production templates allow at most four high-value slots")
+        raise ContractError("production templates allow at most five evidence-backed slots")
     slot_ids = [slot.get("id") for slot in slots if isinstance(slot, Mapping)]
     if len(set(slot_ids)) != len(slot_ids):
         raise ContractError("slot IDs must be unique")

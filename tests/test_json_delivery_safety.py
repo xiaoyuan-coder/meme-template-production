@@ -31,15 +31,15 @@ class JsonDeliverySafetyTests(unittest.TestCase):
                     compiler.write_formal_json(root, invalid)
                 self.assertFalse(root.exists())
 
-    def test_writer_rejects_five_slots_even_when_gallery_schema_accepts_them(self):
+    def test_writer_rejects_six_slots_even_when_gallery_schema_accepts_them(self):
         invalid = copy.deepcopy(self.formal)
         prototype = invalid['inputSchema']['slots'][0]
-        slots = [{**copy.deepcopy(prototype), 'id': f'subject{i}'} for i in range(5)]
+        slots = [{**copy.deepcopy(prototype), 'id': f'subject{i}'} for i in range(6)]
         invalid['inputSchema']['slots'] = slots
         invalid['promptTemplate'] = ' '.join('{{ ' + slot['id'] + ' | "橘白猫" }}' for slot in slots)
         binding = invalid['runtimeSemantics']['inputBindings']['subject']
         invalid['runtimeSemantics']['inputBindings'] = {slot['id']: copy.deepcopy(binding) for slot in slots}
-        with self.assertRaisesRegex(compiler.ContractError, 'at most four'):
+        with self.assertRaisesRegex(compiler.ContractError, 'at most five'):
             compiler.validate_formal_json(invalid)
 
     def test_concurrent_writers_preserve_winner_and_reuse_identical_content(self):

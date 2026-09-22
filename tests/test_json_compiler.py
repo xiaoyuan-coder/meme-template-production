@@ -122,6 +122,48 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual([result["state"] for result in results], ["paused", "completed"])
 
 
+class TemplateTagAssemblyTests(unittest.TestCase):
+    def tagging(self, subject_key="pet.cat", animal="猫"):
+        return {
+            "matchProfile": {
+                "subjects": [{"subjectKey": subject_key, "memberCount": 1}],
+                "sourceImageType": "single_identity",
+            },
+            "hiddenTags": ["动物", "搞怪meme"],
+            "keywords": [animal, "糖果包装", "糖果头像", "宠物拼贴"],
+        }
+
+    def test_hidden_tags_and_keywords_merge_in_stable_order(self):
+        self.assertEqual(
+            compiler.merge_template_discovery_tags(self.tagging()),
+            ["动物", "搞怪meme", "猫", "糖果包装", "糖果头像", "宠物拼贴"],
+        )
+        hamster = self.tagging("pet.hamster", "仓鼠")
+        hamster["keywords"] = ["仓鼠", "零食包装", "宠物包装", "商品拼贴"]
+        self.assertEqual(compiler.merge_template_discovery_tags(hamster)[2], "仓鼠")
+
+    def test_pet_tagging_requires_major_and_specific_animal_tags(self):
+        missing_major = self.tagging()
+        missing_major["hiddenTags"] = ["搞怪meme"]
+        with self.assertRaisesRegex(compiler.ContractError, "动物 hiddenTag"):
+            compiler.merge_template_discovery_tags(missing_major)
+        missing_specific = self.tagging()
+        missing_specific["keywords"][0] = "宠物"
+        with self.assertRaisesRegex(compiler.ContractError, "require the keyword 猫"):
+            compiler.merge_template_discovery_tags(missing_specific)
+
+    def test_low_value_presentation_tags_are_rejected(self):
+        tagging = self.tagging()
+        tagging["keywords"][-1] = "白底图标"
+        with self.assertRaisesRegex(compiler.ContractError, "low-value presentation"):
+            compiler.merge_template_discovery_tags(tagging)
+
+        formal = compiler.project_formal_json(valid_formal_draft(), valid_image_envelope())
+        formal["metadata"]["tags"][-1] = "白底摄影"
+        with self.assertRaisesRegex(compiler.ContractError, "low-value presentation"):
+            compiler.validate_formal_json(formal)
+
+
 class GalleryAndCompilationTests(unittest.TestCase):
     def test_compile_final_json_reuses_upstream_immutable_url(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
@@ -258,6 +300,25 @@ class GalleryAndCompilationTests(unittest.TestCase):
         with self.assertRaises(compiler.ContractError):
             compiler.validate_authoring_contract(searchless_tag, draft, envelope)
 
+    def test_tags_may_describe_the_current_cover_without_locking_generation(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        draft = valid_formal_draft()
+        draft["metadata"]["tags"][-1] = "橘白猫"
+        analysis = valid_approved_analysis(image_sha)
+        analysis["tagEvidence"].pop("互动")
+        analysis["tagEvidence"]["橘白猫"] = {
+            "visualEvidence": "当前模板封面中央可见橘白猫",
+            "searchIntent": "用户搜索橘白猫模板",
+            "category": "subject",
+        }
+        analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
+        compiler.validate_authoring_contract(analysis, draft, envelope)
+
     def test_recognized_ip_identity_uses_specific_natural_default(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
@@ -269,7 +330,10 @@ class GalleryAndCompilationTests(unittest.TestCase):
         slot = draft["inputSchema"]["slots"][0]
         slot["text"]["defaultValue"] = "葛城美里"
         slot["text"]["suggestions"] = ["式波·明日香", "绫波丽", "五条悟"]
-        draft["promptTemplate"] = "双臂紧紧抱住画面中央的{{ subject | \"葛城美里\" }}。"
+        draft["promptTemplate"] = (
+            "画面中央是{{ subject | \"葛城美里\" }}，"
+            "背景为{{ background | \"米白纯色背景\" }}。"
+        )
 
         analysis = valid_approved_analysis(image_sha)
         evidence = analysis["slotEvidence"]["subject"]
@@ -285,17 +349,24 @@ class GalleryAndCompilationTests(unittest.TestCase):
             for value in ("式波·明日香", "绫波丽", "五条悟")
         ]
         evidence["openVisualFacts"] = ["葛城美里", "式波·明日香", "绫波丽", "五条悟"]
+        analysis["editableFactRouting"][0]["promptTerms"] = ["葛城美里"]
+        analysis["editableFactRouting"][0]["forbiddenRuntimeTerms"] = ["葛城美里"]
         analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
         analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
         compiler.validate_authoring_contract(analysis, draft, envelope)
 
         generic_draft = copy.deepcopy(draft)
         generic_draft["inputSchema"]["slots"][0]["text"]["defaultValue"] = "紫发红夹克角色"
-        generic_draft["promptTemplate"] = "双臂紧紧抱住画面中央的{{ subject | \"紫发红夹克角色\" }}。"
+        generic_draft["promptTemplate"] = (
+            "画面中央是{{ subject | \"紫发红夹克角色\" }}，"
+            "背景为{{ background | \"米白纯色背景\" }}。"
+        )
         generic = copy.deepcopy(analysis)
         generic["slotEvidence"]["subject"]["defaultValue"] = "紫发红夹克角色"
         generic["slotEvidence"]["subject"]["identityRecognition"]["canonicalName"] = "紫发红夹克角色"
         generic["slotEvidence"]["subject"]["openVisualFacts"][0] = "紫发红夹克角色"
+        generic["editableFactRouting"][0]["promptTerms"] = ["紫发红夹克角色"]
+        generic["editableFactRouting"][0]["forbiddenRuntimeTerms"] = ["紫发红夹克角色"]
         generic["semanticModel"]["promptTemplate"] = generic_draft["promptTemplate"]
         generic["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(generic_draft)
         with self.assertRaises(compiler.ContractError):
@@ -306,14 +377,14 @@ class GalleryAndCompilationTests(unittest.TestCase):
         with self.assertRaises(compiler.ContractError):
             compiler.validate_authoring_contract(overdescribed, draft, envelope)
 
-    def test_slot_count_preference_is_two_to_four_and_caps_at_four(self):
+    def test_slot_count_preference_allows_a_fifth_evidence_backed_slot(self):
         contract = json.loads((
             ROOT / "skills/meme-template-json-compiler/references/machine-contract.json"
         ).read_text(encoding="utf-8"))
         preference = contract["authoring"]["slotCountPreference"]
         self.assertEqual(preference, {
             "minimum": 2,
-            "maximum": 4,
+            "maximum": 5,
             "singleSlotRequiresCoverageReview": True,
         })
 
@@ -330,8 +401,15 @@ class GalleryAndCompilationTests(unittest.TestCase):
         oversized = copy.deepcopy(draft)
         for index in range(4):
             oversized["inputSchema"]["slots"].append({"id": f"extra_{index}"})
-        with self.assertRaisesRegex(compiler.ContractError, "at most four"):
+        with self.assertRaisesRegex(compiler.ContractError, "at most five"):
             compiler.validate_authoring_contract(analysis, oversized, envelope)
+
+        empty_label = valid_formal_draft()
+        empty_label["inputSchema"]["slots"][0]["label"] = ""
+        with self.assertRaisesRegex(compiler.ContractError, "user-facing"):
+            compiler.validate_authoring_contract(
+                valid_approved_analysis(image_sha), empty_label, envelope
+            )
 
     def test_play_decisions_slot_coverage_and_precision_are_machine_gated(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
@@ -467,6 +545,69 @@ class GalleryAndCompilationTests(unittest.TestCase):
         with self.assertRaises(compiler.ContractError):
             compiler.validate_authoring_contract(locked_analysis, locked, envelope)
 
+    def test_subject_label_is_valid_and_editable_aliases_cannot_be_locked(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        draft = valid_formal_draft()
+        self.assertEqual(draft["inputSchema"]["slots"][0]["label"], "主体")
+        compiler.validate_authoring_contract(valid_approved_analysis(image_sha), draft, envelope)
+
+        locked = copy.deepcopy(draft)
+        locked["runtimeSemantics"]["visualContract"]["styleTraits"].append("中央固定为橘猫")
+        locked_analysis = valid_approved_analysis(image_sha)
+        locked_analysis["editableFactRouting"][0]["forbiddenRuntimeTerms"].append("橘猫")
+        locked_analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(
+            locked["runtimeSemantics"]
+        )
+        locked_analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(locked)
+        with self.assertRaisesRegex(
+            compiler.ContractError, "EDITABLE_FACT_LOCKED_IN_VISUAL_CONTRACT"
+        ):
+            compiler.validate_authoring_contract(locked_analysis, locked, envelope)
+
+    def test_editable_fact_dependency_closure_is_machine_gated(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        analysis = valid_approved_analysis(image_sha)
+        analysis["editableFactRouting"][0]["requiredTargetIds"].append("background_canvas")
+        with self.assertRaisesRegex(
+            compiler.ContractError, "EDITABLE_DEPENDENCY_TARGET_UNBOUND"
+        ):
+            compiler.validate_authoring_contract(analysis, valid_formal_draft(), envelope)
+
+    def test_visual_element_routes_cover_components_and_editable_facts(self):
+        image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
+        envelope = {
+            "schemaVersion": 2, "status": "approved_uploaded",
+            "image": {"uri": f"https://assets.memebuy.cn/gallery/template-images/{image_sha}.png", "sha256": image_sha,
+                      "width": 1024, "height": 1024, "mime": "image/png"},
+        }
+        draft = valid_formal_draft()
+
+        missing_component = valid_approved_analysis(image_sha)
+        missing_component["promptCoverage"]["visualElementRoutes"].pop()
+        with self.assertRaisesRegex(
+            compiler.ContractError, "cover componentGraph exactly once"
+        ):
+            compiler.validate_authoring_contract(missing_component, draft, envelope)
+
+        unowned_fact = valid_approved_analysis(image_sha)
+        unowned_fact["promptCoverage"]["visualElementRoutes"][1]["factIds"] = [
+            "subject_identity"
+        ]
+        with self.assertRaisesRegex(
+            compiler.ContractError, "fact ownership is inconsistent"
+        ):
+            compiler.validate_authoring_contract(unowned_fact, draft, envelope)
+
     def test_text_slot_routing_and_self_review_sha_cannot_be_stale(self):
         image_sha = hashlib.sha256(PNG_BYTES).hexdigest()
         envelope = {
@@ -553,14 +694,15 @@ class GalleryAndCompilationTests(unittest.TestCase):
         draft["promptTemplate"] = (
             "{{ left_caption | \"童年好友\" }}标记左侧人物，"
             "{{ right_caption | \"同桌伙伴\" }}标记右侧人物；"
-            "双臂紧紧抱住画面中央的{{ subject | \"橘白猫\" }}。"
+            "画面中央是{{ subject | \"橘白猫\" }}，"
+            "背景为{{ background | \"米白纯色背景\" }}。"
         )
         draft["runtimeSemantics"]["visualContract"]["relations"].append(
             "两段箭头文字分别指向左右人物"
         )
 
         analysis = valid_approved_analysis(image_sha)
-        analysis["counts"]["inputControlCount"] = 3
+        analysis["counts"]["inputControlCount"] = 4
         analysis["textRegions"] = []
         for slot_id, (label, default, suggestions) in labels.items():
             target_id = slot_id.replace("caption", "label")
@@ -605,6 +747,24 @@ class GalleryAndCompilationTests(unittest.TestCase):
                 "targetIds": [target_id], "visualContractFields": ["relations"],
             }
             analysis["semanticModel"]["dynamicFactSources"][slot_id] = f"inputSchema.slots.{slot_id}"
+            fact_id = f"{slot_id}_text"
+            analysis["editableFactRouting"].append({
+                "factId": fact_id,
+                "axis": "text",
+                "owner": "slot",
+                "slotId": slot_id,
+                "promptTerms": [default],
+                "forbiddenRuntimeTerms": [default, *suggestions],
+                "requiredTargetIds": [target_id],
+                "evidence": f"{label}文字由 {slot_id} 槽位编辑",
+            })
+            analysis["promptCoverage"]["visualElementRoutes"].append({
+                "componentId": target_id,
+                "route": "slot",
+                "slotId": slot_id,
+                "factIds": [fact_id],
+                "evidence": f"{label}文字由 {slot_id} 槽位控制",
+            })
             analysis["playDecisionModel"]["coreUserDecisions"].append({
                 "decisionId": f"choose_{slot_id}",
                 "description": f"选择{label}的关系文字",
@@ -613,8 +773,11 @@ class GalleryAndCompilationTests(unittest.TestCase):
             })
             analysis["slotCoverageReview"]["axes"]["text"]["candidateComponentIds"].append(target_id)
             analysis["slotCoverageReview"]["axes"]["text"]["selectedSlotIds"].append(slot_id)
-        analysis["slotCoverageReview"]["selectedSlotIds"] = ["subject", *labels]
-        analysis["promptCoverage"]["slotIds"] = ["subject", *labels]
+        analysis["slotCoverageReview"]["selectedSlotIds"] = ["subject", "background", *labels]
+        analysis["promptCoverage"]["slotIds"] = ["subject", "background", *labels]
+        analysis["promptCoverage"]["editableFactIds"] = [
+            fact["factId"] for fact in analysis["editableFactRouting"]
+        ]
         analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
         analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(draft["runtimeSemantics"])
         analysis["selfReview"]["reviewedDraftSha256"] = compiler.sha256_json(draft)
@@ -632,11 +795,14 @@ class GalleryAndCompilationTests(unittest.TestCase):
         slot = draft["inputSchema"]["slots"][0]
         slot["text"]["defaultValue"] = "家庭成员"
         slot["text"]["suggestions"] = ["亲友团", "同事团队", "同学聚会"]
-        draft["promptTemplate"] = "{{ subject | \"家庭成员\" }}围拢在画面中央并保持紧密互动。"
-        draft["runtimeSemantics"]["targetInstances"] = [{
+        draft["promptTemplate"] = (
+            "画面中央是{{ subject | \"家庭成员\" }}，"
+            "背景为{{ background | \"米白纯色背景\" }}。"
+        )
+        draft["runtimeSemantics"]["targetInstances"][0] = {
             "id": "subject_group", "kind": "identity_group", "role": "中央合照群组",
             "region": "画面中央", "memberKind": "person", "minMembers": 2, "maxMembers": 8,
-        }]
+        }
         draft["runtimeSemantics"]["inputBindings"]["subject"] = {
             "operation": "replace_identity",
             "targetIds": ["subject_group"],
@@ -647,28 +813,26 @@ class GalleryAndCompilationTests(unittest.TestCase):
             "clothingOwnership": "source",
         }
         analysis = valid_approved_analysis(image_sha)
-        analysis["componentGraph"] = [
-            {"componentId": "subject_group", "role": "identity_group", "region": "center"}
-        ]
+        analysis["componentGraph"][0] = {
+            "componentId": "subject_group", "role": "identity_group", "region": "center"
+        }
+        analysis["promptCoverage"]["visualElementRoutes"][0]["componentId"] = "subject_group"
         analysis["identityTopology"] = [
             {"identityUnitId": "subject", "instanceIds": ["subject_group"]}
         ]
-        analysis["editableCandidates"] = [
-            {
-                "slotId": "subject", "componentId": "subject_group", "selected": True,
-                "selectionReason": "identity_control", "exclusionReason": None,
-            }
-        ]
+        analysis["editableCandidates"][0] = {
+            "slotId": "subject", "componentId": "subject_group", "selected": True,
+            "selectionReason": "identity_control", "exclusionReason": None,
+        }
         analysis["slotCoverageReview"]["axes"]["subject"]["candidateComponentIds"] = ["subject_group"]
         analysis["semanticModel"]["promptTemplate"] = draft["promptTemplate"]
         analysis["semanticModel"]["runtimeSemantics"] = copy.deepcopy(draft["runtimeSemantics"])
-        analysis["semanticModel"]["componentCoverage"] = {
-            "subject_group": {
-                "targetIds": ["subject_group"],
-                "visualContractFields": [
-                    "medium", "styleTraits", "composition", "relations", "colorAndLight"
-                ],
-            }
+        analysis["semanticModel"]["componentCoverage"].pop("subject_main")
+        analysis["semanticModel"]["componentCoverage"]["subject_group"] = {
+            "targetIds": ["subject_group"],
+            "visualContractFields": [
+                "medium", "styleTraits", "composition", "relations", "colorAndLight"
+            ],
         }
         analysis["semanticModel"]["completeRedrawByTarget"] = {"subject_group": True}
         analysis["slotEvidence"]["subject"]["bindingKind"] = "preserve_group"
@@ -685,6 +849,9 @@ class GalleryAndCompilationTests(unittest.TestCase):
         analysis["slotEvidence"]["subject"]["openVisualFacts"] = [
             "家庭成员", "亲友团", "同事团队", "同学聚会",
         ]
+        analysis["editableFactRouting"][0]["promptTerms"] = ["家庭成员"]
+        analysis["editableFactRouting"][0]["forbiddenRuntimeTerms"] = ["家庭成员"]
+        analysis["editableFactRouting"][0]["requiredTargetIds"] = ["subject_group"]
         analysis["slotEvidence"]["subject"].pop("identityRecognition")
         analysis["slotEvidence"]["subject"]["groupDecision"] = {
             "wholeGroupIdentityFidelity": True,

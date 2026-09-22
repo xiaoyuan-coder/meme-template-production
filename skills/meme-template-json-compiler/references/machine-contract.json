@@ -1,5 +1,5 @@
 {
-  "contractVersion": 10,
+  "contractVersion": 13,
   "deliveryReadback": {
     "surfaceFields": {
       "list": ["key", "title", "description", "cover"],
@@ -68,6 +68,23 @@
       "人物", "动物", "二次元", "粉丝应援", "情侣", "亲子家庭", "美食",
       "风景建筑", "搞怪meme", "文字设计", "创意艺术"
     ],
+    "tagAssembly": {
+      "hiddenMinimum": 1,
+      "hiddenMaximum": 2,
+      "keywordMinimum": 4,
+      "keywordMaximum": 6,
+      "animalKeywordBySubjectKey": {
+        "pet.cat": "猫",
+        "pet.dog": "狗",
+        "pet.rabbit": "兔子",
+        "pet.bird": "鸟",
+        "pet.hamster": "仓鼠"
+      },
+      "excludedPresentationTags": [
+        "白底摄影", "白底图标", "纯白背景", "居中构图",
+        "高清图片", "干净背景", "柔和光线", "清晰细节"
+      ]
+    },
     "expectedEvidenceFields": [
       "key", "title", "description", "tags", "imageSize", "slots", "suggestions",
       "defaults", "text", "subjectsAndIdentityBindings", "promptTemplate",
@@ -105,9 +122,13 @@
     ],
     "slotCountPreference": {
       "minimum": 2,
-      "maximum": 4,
+      "maximum": 5,
       "singleSlotRequiresCoverageReview": true
     },
+    "editableFactAxes": [
+      "identity", "text", "content", "color", "shape", "material", "pattern",
+      "background", "clothing", "prop", "action", "composition"
+    ],
     "quickTextLimits": {
       "maxContinuousCharacters": 20,
       "maxWhitespaceTokens": 7,
